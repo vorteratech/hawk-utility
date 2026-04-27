@@ -1,0 +1,11 @@
+[project]
+name = "hawk-wrapper-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.136.1",
+    "uvicorn[standard]>=0.46.0",
+    "websockets>=16.0",
+]
