@@ -377,25 +377,27 @@ class EngagementProcess:
         self._auth_target = "graph"
         await self._emit_state({"type": "auth_step", "step": "importing_modules"})
 
-        # Import HAWK FIRST so its required Microsoft.Graph submodule
-        # versions get loaded into the process before Connect-MgGraph runs.
-        # If we connect first, Connect-MgGraph auto-loads whatever version of
-        # Microsoft.Graph.Authentication is highest-installed; later
-        # HAWK auto-load demands its specific version and PowerShell can't
-        # have two versions of the same assembly loaded -- which is exactly
-        # the 'Assembly with same name is already loaded' error we hit on
-        # the test VM. Loading HAWK first pins the right chain.
-        # *>&1 folds Information/Warning/Verbose into Success so any prompts
-        # or progress text hit our pipe.
+        # Import HAWK FIRST so its specific Microsoft.Graph.Authentication
+        # version (HAWK is binary-compiled against 2.36.1 strong-named ref)
+        # gets pinned into the process before any Connect call. Otherwise
+        # Connect-MgGraph would auto-load whichever Authentication version
+        # is highest-installed and HAWK's later auto-load would conflict
+        # ('Assembly with same name is already loaded').
+        #
+        # Using device-code auth: Connect-MgGraph -UseDeviceCode (well-
+        # supported on 2.36+), Connect-ExchangeOnline -Device (EXO 3.x
+        # parameter; '-DeviceAuthentication' from EXO 2.x was renamed).
+        # *>&1 folds Information/Warning/Verbose into Success so device-
+        # code prompt text reaches our pipe.
         invocation = (
             "Import-Module HAWK -ErrorAction Stop *>&1; "
             "Write-Output '__HAWK_AUTH_MODULES_LOADED__'; "
-            f"Connect-MgGraph -NoWelcome -Scopes {scopes_pwsh} *>&1; "
+            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
-            "Connect-ExchangeOnline -ShowBanner:$false *>&1; "
+            "Connect-ExchangeOnline -Device -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
-        clean = "Import-Module HAWK ; Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
+        clean = "Import-Module HAWK ; Connect-MgGraph -UseDeviceCode ; Connect-ExchangeOnline -Device"
         script = make_run_script(invocation)
 
         run_id = await self.register_run(

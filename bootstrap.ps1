@@ -99,10 +99,13 @@ if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolic
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 }
 
-# Microsoft.Graph 2.36.1 ships a broken Authentication.Core (TypeLoadException
-# on UserProvidedTokenCredential.GetTokenAsync) that breaks HAWK import. Pin
-# to the last known-good build until the gallery has a verified fix.
-$GraphPinnedVersion = '2.25.0'
+# HAWK 4.0 is binary-compiled against Microsoft.Graph.Authentication 2.36.1
+# (strong-named .NET reference). Earlier pins to 2.25.0 caused 'Assembly
+# with same name is already loaded' at HAWK auto-load time on the test VM.
+# 2.36.1 has a known TypeLoadException on UserProvidedTokenCredential
+# (used only in -AccessToken auth, which we don't use), so the device-code
+# flow we run is fine on 2.36.1.
+$GraphPinnedVersion = '2.36.1'
 
 # CurrentUser scope sidesteps the AllUsers PackageManagement lock issues
 # that hit shared machines where modules are open in another process.
