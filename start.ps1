@@ -14,10 +14,10 @@ $backendDir = Join-Path $RepoRoot 'backend'
 $frontendDir = Join-Path $RepoRoot 'frontend'
 
 if (-not (Test-Path (Join-Path $backendDir '.venv\Scripts\Activate.ps1'))) {
-    throw "Backend venv missing. Run .\bootstrap.ps1 first."
+    throw "Backend venv missing. Run .\setup.ps1 first."
 }
 if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) {
-    throw "Frontend node_modules missing. Run .\bootstrap.ps1 first."
+    throw "Frontend node_modules missing. Run .\setup.ps1 first."
 }
 
 # `pip install -e .` and `npm install` are fast no-ops when nothing changed
