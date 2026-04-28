@@ -33,6 +33,7 @@ export function EngagementPage() {
   const [deviceCode, setDeviceCode] = useState<DeviceCode | null>(null)
   const [authStep, setAuthStep] = useState<string | null>(null)
   const [authComplete, setAuthComplete] = useState(false)
+  const [exoDirty, setExoDirty] = useState(false)
 
   // Sync from server on initial load (in case the WS stream missed the
   // earlier events, e.g. after a tab refresh).
@@ -52,6 +53,11 @@ export function EngagementPage() {
     } else if (evt.type === 'auth_complete') {
       setAuthComplete(true)
       setDeviceCode(null)
+      qc.invalidateQueries({ queryKey: ['engagement', id] })
+    } else if (evt.type === 'exo_module_failure') {
+      setExoDirty(true)
+    } else if (evt.type === 'exo_module_recovered') {
+      setExoDirty(false)
       qc.invalidateQueries({ queryKey: ['engagement', id] })
     } else if (evt.type === 'run_started' || evt.type === 'run_finished') {
       qc.invalidateQueries({ queryKey: ['engagement', id] })
@@ -112,6 +118,8 @@ export function EngagementPage() {
         </div>
       </header>
 
+      {exoDirty && <ExoFailureBanner engagementId={id} onCleared={() => setExoDirty(false)} />}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
           <ConsolePane engagementId={id} isActive={isActive} onState={onState} />
@@ -135,6 +143,42 @@ export function EngagementPage() {
         deviceCode={deviceCode}
         onDismiss={() => setDeviceCode(null)}
       />
+    </div>
+  )
+}
+
+function ExoFailureBanner({
+  engagementId,
+  onCleared,
+}: {
+  engagementId: number
+  onCleared: () => void
+}) {
+  const reconnect = useMutation({
+    mutationFn: () => api.reconnectExo(engagementId),
+    onSuccess: () => onCleared(),
+  })
+  return (
+    <div className="mb-4 rounded-lg border border-[var(--color-warn)] bg-[color-mix(in_srgb,var(--color-warn)_10%,transparent)] p-4 flex items-start justify-between gap-4">
+      <div>
+        <p className="text-sm font-medium text-[var(--color-warn)]">
+          Exchange Online module needs reconnect
+        </p>
+        <p className="text-xs text-[var(--color-muted)] mt-1 max-w-xl">
+          HAWK reported "Module could not be correctly formed" (issue #292) —
+          a known mid-investigation EXO state issue. Click below to run
+          Disconnect-ExchangeOnline + Connect-ExchangeOnline in the same
+          subprocess. You'll see a fresh device-code prompt for EXO. Then
+          re-run the failed cmdlet.
+        </p>
+      </div>
+      <Button
+        variant="primary"
+        onClick={() => reconnect.mutate()}
+        disabled={reconnect.isPending}
+      >
+        {reconnect.isPending ? 'Reconnecting…' : 'Reconnect EXO'}
+      </Button>
     </div>
   )
 }

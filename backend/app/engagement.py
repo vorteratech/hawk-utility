@@ -93,6 +93,12 @@ class EngagementProcess:
         self._auth_target: Optional[str] = None
         self._auth_complete: bool = False
 
+        # HAWK issue #292: EXO module periodically reports "Module could not
+        # be correctly formed" mid-investigation. When detected we surface a
+        # one-click Reconnect EXO action and remember the dirty state so the
+        # next reconnect kicks the engagement back into a healthy place.
+        self._exo_module_dirty: bool = False
+
         self._lock = asyncio.Lock()
         self._terminated = False
 
@@ -253,6 +259,7 @@ class EngagementProcess:
             self._check_sentinel(text)
             await self._check_auth_markers(text)
             await self._check_device_code(text)
+            await self._check_exo_module_failure(text)
             if _is_wrapper_noise(text):
                 # Still write to the run log file for forensic completeness;
                 # don't fan out to console subscribers.
@@ -299,6 +306,23 @@ class EngagementProcess:
                 "url": m.group("url"),
                 "code": m.group("code"),
                 "target": self._auth_target,
+            }
+        )
+
+    async def _check_exo_module_failure(self, text: str) -> None:
+        """Plan §10 / HAWK issue #292: EXO module gets into a 'cannot be
+        correctly formed' state mid-investigation. Surface a state event so
+        the UI can offer a one-click Reconnect EXO."""
+        if "Module could not be correctly formed" not in text:
+            return
+        if self._exo_module_dirty:
+            return  # already flagged; don't spam events
+        self._exo_module_dirty = True
+        await self._emit_state(
+            {
+                "type": "exo_module_failure",
+                "detail": text.strip(),
+                "run_id": self._current_run_id,
             }
         )
 
@@ -439,6 +463,28 @@ class EngagementProcess:
         if status == "succeeded":
             self._auth_complete = True
             await self._emit_state({"type": "auth_complete"})
+        return status, detail
+
+    async def reconnect_exo(self) -> tuple[str, str]:
+        """Run a Disconnect-ExchangeOnline + Connect-ExchangeOnline cycle in
+        the live subprocess. Used when HAWK issue #292 fires and the EXO
+        module is reported 'could not be correctly formed'."""
+        invocation = (
+            "try { Disconnect-ExchangeOnline -Confirm:$false } catch {} *>&1; "
+            "Connect-ExchangeOnline -Device -ShowBanner:$false *>&1"
+        )
+        clean = "Reconnect-ExchangeOnline (HAWK issue #292 recovery)"
+        script = make_run_script(invocation)
+        run_id = await self.register_run(
+            cmdlet="Reconnect-ExchangeOnline",
+            params={},
+            invocation_script=script,
+            clean_invocation=clean,
+        )
+        status, detail = await self.await_run(run_id)
+        if status == "succeeded":
+            self._exo_module_dirty = False
+            await self._emit_state({"type": "exo_module_recovered"})
         return status, detail
 
     async def await_run(self, run_id: int) -> tuple[str, str]:

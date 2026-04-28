@@ -182,6 +182,18 @@ def delete_engagement(engagement_id: int, delete_folder: bool = False) -> dict:
     return {"ok": True, "folder_removed": folder_removed}
 
 
+@router.post("/{engagement_id}/reconnect-exo")
+async def reconnect_exo(engagement_id: int) -> dict:
+    """Re-run Connect-ExchangeOnline in the engagement's subprocess. Used
+    to recover from HAWK issue #292 ('Module could not be correctly
+    formed')."""
+    eng = current()
+    if eng is None or eng.engagement_id != engagement_id:
+        raise HTTPException(404, "no active engagement with that id")
+    asyncio.create_task(eng.reconnect_exo())
+    return {"ok": True}
+
+
 @router.post("/{engagement_id}/end")
 async def end_engagement(engagement_id: int) -> dict:
     eng = current()

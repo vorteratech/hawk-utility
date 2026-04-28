@@ -65,6 +65,8 @@ export type StateEvent =
   | { type: 'device_code'; url: string; code: string; target: 'graph' | 'exo' | null; ts: string }
   | { type: 'auth_step'; step: 'importing_modules' | 'graph_starting' | 'graph_done' | 'exo_done'; ts: string }
   | { type: 'auth_complete'; ts: string }
+  | { type: 'exo_module_failure'; detail: string; run_id: number | null; ts: string }
+  | { type: 'exo_module_recovered'; ts: string }
   | { type: 'error'; msg: string }
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -105,6 +107,10 @@ export const api = {
     }),
   endEngagement: (id: number) =>
     jsonFetch<{ ok: true }>(`/api/engagements/${id}/end`, { method: 'POST' }),
+  reconnectExo: (id: number) =>
+    jsonFetch<{ ok: true }>(`/api/engagements/${id}/reconnect-exo`, {
+      method: 'POST',
+    }),
   deleteEngagement: (id: number, deleteFolder = false) =>
     jsonFetch<{ ok: true; folder_removed: boolean }>(
       `/api/engagements/${id}?delete_folder=${deleteFolder}`,
