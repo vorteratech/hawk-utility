@@ -1,4 +1,4 @@
-# bootstrap.ps1 — one-time setup for hawk-wrapper on a fresh Windows VM.
+# bootstrap.ps1 --one-time setup for hawk-wrapper on a fresh Windows VM.
 # Idempotent: re-running it is safe and skips anything already installed.
 #
 # Usage (in PowerShell 7 from the repo root):
@@ -62,7 +62,7 @@ foreach ($t in $tools) {
     }
 }
 if ($missing.Count -gt 0) {
-    Write-Warning "Some tools are not on PATH yet. Open a NEW PowerShell window and re-run this script — winget installs sometimes only register on shell restart. Missing: $($missing -join ', ')"
+    Write-Warning "Some tools are not on PATH yet. Open a NEW PowerShell window and re-run this script --winget installs sometimes only register on shell restart. Missing: $($missing -join ', ')"
     return
 }
 
@@ -106,7 +106,7 @@ try {
     if (-not (Test-Path 'node_modules')) {
         npm install --silent
     } else {
-        Write-Host "  node_modules already exists — running 'npm install' to sync lockfile" -ForegroundColor DarkGray
+        Write-Host "  node_modules already exists --running 'npm install' to sync lockfile" -ForegroundColor DarkGray
         npm install --silent
     }
     Write-Host "  Frontend deps installed" -ForegroundColor Green
