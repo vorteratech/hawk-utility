@@ -70,16 +70,53 @@ if ($missing.Count -gt 0) {
 Write-Step "Installing HAWK and Microsoft.Graph PowerShell modules"
 Write-Host "  This pulls ~30 Graph submodules and can take 5+ minutes." -ForegroundColor DarkGray
 
-# Use CurrentUser scope to avoid the AllUsers PackageManagement lock issues
-# that hit Windows machines where modules are open in another process.
-foreach ($mod in @('HAWK', 'Microsoft.Graph')) {
-    $existing = Get-Module -ListAvailable -Name $mod | Sort-Object Version -Descending | Select-Object -First 1
-    if ($existing) {
-        Write-Host "  - $mod $($existing.Version) already installed" -ForegroundColor DarkGray
-        continue
+# Force TLS 1.2 -- fresh Windows defaults are often too old for PSGallery.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+# Bootstrap NuGet provider quietly if missing.
+if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+          Where-Object Version -ge ([version]'2.8.5.201'))) {
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+}
+
+# Trust PSGallery so Install-Module doesn't prompt.
+if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -ne 'Trusted') {
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+}
+
+# Microsoft.Graph 2.36.1 ships a broken Authentication.Core (TypeLoadException
+# on UserProvidedTokenCredential.GetTokenAsync) that breaks HAWK import. Pin
+# to the last known-good build until the gallery has a verified fix.
+$GraphPinnedVersion = '2.25.0'
+
+# CurrentUser scope sidesteps the AllUsers PackageManagement lock issues
+# that hit shared machines where modules are open in another process.
+$existingHawk = Get-Module -ListAvailable -Name HAWK | Sort-Object Version -Descending | Select-Object -First 1
+if ($existingHawk) {
+    Write-Host "  - HAWK $($existingHawk.Version) already installed" -ForegroundColor DarkGray
+} else {
+    Write-Host "  - HAWK installing..." -ForegroundColor Yellow
+    Install-Module -Name HAWK -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
+}
+
+$existingGraph = Get-Module -ListAvailable -Name Microsoft.Graph |
+                 Where-Object Version -eq ([version]$GraphPinnedVersion) |
+                 Select-Object -First 1
+if ($existingGraph) {
+    Write-Host "  - Microsoft.Graph $GraphPinnedVersion already installed" -ForegroundColor DarkGray
+} else {
+    # Remove any other Graph version first; mixing causes assembly load
+    # errors when HAWK tries to Import-Module Microsoft.Graph.Authentication.
+    $stale = Get-Module -ListAvailable -Name 'Microsoft.Graph*' |
+             Where-Object Version -ne ([version]$GraphPinnedVersion)
+    if ($stale) {
+        Write-Host "  - Removing stale Microsoft.Graph* versions to avoid assembly conflicts..." -ForegroundColor Yellow
+        $stale | Group-Object Name | ForEach-Object {
+            Uninstall-Module -Name $_.Name -AllVersions -Force -ErrorAction SilentlyContinue
+        }
     }
-    Write-Host "  - $mod installing..." -ForegroundColor Yellow
-    Install-Module -Name $mod -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
+    Write-Host "  - Microsoft.Graph $GraphPinnedVersion installing (this is the slow one)..." -ForegroundColor Yellow
+    Install-Module -Name Microsoft.Graph -RequiredVersion $GraphPinnedVersion -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
 }
 
 # --- 3. Backend ----------------------------------------------------------
