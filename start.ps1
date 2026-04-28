@@ -20,8 +20,11 @@ if (-not (Test-Path (Join-Path $frontendDir 'node_modules'))) {
     throw "Frontend node_modules missing. Run .\bootstrap.ps1 first."
 }
 
-$backendCmd = "Set-Location '$backendDir'; .\.venv\Scripts\Activate.ps1; uvicorn main:app --host 127.0.0.1 --port 8000"
-$frontendCmd = "Set-Location '$frontendDir'; npm run dev"
+# `pip install -e .` and `npm install` are fast no-ops when nothing changed
+# (uv-style: only fetches deltas), so running them on every start makes
+# `git pull` + `.\start.ps1` 'just work' even after a commit adds new deps.
+$backendCmd = "Set-Location '$backendDir'; .\.venv\Scripts\Activate.ps1; pip install --quiet -e .; uvicorn main:app --host 127.0.0.1 --port 8000"
+$frontendCmd = "Set-Location '$frontendDir'; npm install --silent; npm run dev"
 
 Write-Host "Starting backend in a new window..." -ForegroundColor Cyan
 Start-Process pwsh -ArgumentList '-NoExit', '-NoLogo', '-Command', $backendCmd
