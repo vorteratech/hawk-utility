@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type ConsoleLine, type Run, type StateEvent } from '../lib/api'
 import { useConsoleStream, useStateStream } from '../lib/ws'
 import { Button, Card, Err, Modal, StatusBadge } from '../components/ui'
+import { FilesTab } from './FilesTab'
 
 type DeviceCode = { url: string; code: string; target: 'graph' | 'exo' | null }
 
@@ -34,6 +35,7 @@ export function EngagementPage() {
   const [authStep, setAuthStep] = useState<string | null>(null)
   const [authComplete, setAuthComplete] = useState(false)
   const [exoDirty, setExoDirty] = useState(false)
+  const [tab, setTab] = useState<'console' | 'files'>('console')
 
   // Sync from server on initial load (in case the WS stream missed the
   // earlier events, e.g. after a tab refresh).
@@ -120,24 +122,37 @@ export function EngagementPage() {
 
       {exoDirty && <ExoFailureBanner engagementId={id} onCleared={() => setExoDirty(false)} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
-          <ConsolePane engagementId={id} isActive={isActive} onState={onState} />
-        </div>
-        <div className="space-y-4">
-          <CmdletPickerCard
-            engagementId={id}
-            startDate={eng.start_date}
-            endDate={eng.end_date}
-            outputFolder={eng.output_folder}
-            disabled={!cmdletsEnabled}
-            disabledReason={
-              !isActive ? 'Engagement ended' : !authComplete ? 'Waiting for device-code auth' : undefined
-            }
-          />
-          <RunsCard runs={data?.runs ?? []} />
-        </div>
+      <div className="mb-4 flex items-center gap-1 border-b border-[var(--color-border)]">
+        <TabButton active={tab === 'console'} onClick={() => setTab('console')}>
+          Console
+        </TabButton>
+        <TabButton active={tab === 'files'} onClick={() => setTab('files')}>
+          Files
+        </TabButton>
       </div>
+
+      {tab === 'console' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2">
+            <ConsolePane engagementId={id} isActive={isActive} onState={onState} />
+          </div>
+          <div className="space-y-4">
+            <CmdletPickerCard
+              engagementId={id}
+              startDate={eng.start_date}
+              endDate={eng.end_date}
+              outputFolder={eng.output_folder}
+              disabled={!cmdletsEnabled}
+              disabledReason={
+                !isActive ? 'Engagement ended' : !authComplete ? 'Waiting for device-code auth' : undefined
+              }
+            />
+            <RunsCard runs={data?.runs ?? []} />
+          </div>
+        </div>
+      )}
+
+      {tab === 'files' && <FilesTab engagementId={id} />}
 
       <DeviceCodeModal
         deviceCode={deviceCode}
@@ -250,6 +265,30 @@ function DeviceCodeModal({
 function Centered({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center">{children}</div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+        active
+          ? 'border-[var(--color-accent)] text-[var(--color-text)]'
+          : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 

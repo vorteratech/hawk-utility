@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import engagements, runs, system, ws
+from app.api import engagements, files, runs, system, ws
 from app.config import ENGAGEMENTS_ROOT
 from app.db import get_conn, init_db
 
@@ -58,6 +58,7 @@ app.add_middleware(
 
 app.include_router(system.router)
 app.include_router(engagements.router)
+app.include_router(files.router)
 app.include_router(runs.router)
 app.include_router(ws.router)
 

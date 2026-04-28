@@ -132,3 +132,47 @@ export function wsUrl(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}${path}`
 }
+
+// ---------- Files tab ----------
+export type FileNode = {
+  name: string
+  path: string
+  kind: 'file' | 'dir'
+  size: number | null
+  modified: string
+  is_investigate?: boolean
+  children?: FileNode[]
+  truncated?: boolean
+  error?: string
+}
+
+export type CsvPreview = {
+  kind: 'csv'
+  size: number
+  headers: string[]
+  rows: string[][]
+  total_rows: number
+  preview_rows: number
+  truncated: boolean
+}
+
+export type TextPreview = {
+  kind: 'text'
+  size: number
+  text: string
+  truncated: boolean
+  shown_bytes: number
+}
+
+export type FilePreview = CsvPreview | TextPreview
+
+export const filesApi = {
+  tree: (engagementId: number) =>
+    jsonFetch<{ root: FileNode }>(`/api/engagements/${engagementId}/files`),
+  preview: (engagementId: number, path: string) =>
+    jsonFetch<FilePreview>(
+      `/api/engagements/${engagementId}/files/preview?path=${encodeURIComponent(path)}`,
+    ),
+  downloadUrl: (engagementId: number, path: string) =>
+    `/api/engagements/${engagementId}/files/download?path=${encodeURIComponent(path)}`,
+}
