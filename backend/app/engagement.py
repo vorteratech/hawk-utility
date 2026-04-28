@@ -152,6 +152,11 @@ class EngagementProcess:
         self._readers.append(
             asyncio.create_task(self._pump(self._proc.stderr, "stderr"))
         )
+        # Background watchdog: catches the subprocess dying out from under
+        # us (admin kill, OOM, host reboot didn't clean up cleanly) and
+        # turns it into an engagement_crashed state event so the UI can
+        # disable the cmdlet picker instead of silently hanging.
+        self._readers.append(asyncio.create_task(self._watchdog()))
         await self._emit_state({"type": "engagement_started", "engagement_id": self.engagement_id})
         await self._emit_meta(f"[wrapper] pwsh subprocess started, pid={self._proc.pid}")
 
@@ -308,6 +313,48 @@ class EngagementProcess:
                 "target": self._auth_target,
             }
         )
+
+    async def _watchdog(self) -> None:
+        """Polls the subprocess every ~3 s. If it died unexpectedly (we
+        didn't initiate a terminate), emit engagement_crashed and clean up."""
+        while True:
+            await asyncio.sleep(3.0)
+            if self._terminated:
+                return
+            if self._proc is None:
+                return
+            if self._proc.returncode is not None:
+                # Subprocess died on us.
+                exit_code = self._proc.returncode
+                await self._emit_meta(
+                    f"[wrapper] subprocess exited unexpectedly with code {exit_code}"
+                )
+                # Mark any in-flight run as interrupted, fire crashed state,
+                # update DB.
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE engagements SET status='crashed', ended_at=?, pwsh_pid=NULL "
+                        "WHERE id=? AND status IN ('starting','active')",
+                        (_now_iso(), self.engagement_id),
+                    )
+                    conn.execute(
+                        "UPDATE runs SET status='interrupted', ended_at=? "
+                        "WHERE engagement_id=? AND status IN ('queued','running')",
+                        (_now_iso(), self.engagement_id),
+                    )
+                await self._emit_state(
+                    {
+                        "type": "engagement_crashed",
+                        "engagement_id": self.engagement_id,
+                        "exit_code": exit_code,
+                    }
+                )
+                # Wake any sentinel-waiters so they don't hang forever.
+                if self._sentinel_event is not None and not self._sentinel_event.is_set():
+                    self._sentinel_outcome = ("interrupted", f"subprocess died (exit {exit_code})")
+                    self._sentinel_event.set()
+                self._terminated = True
+                return
 
     async def _check_exo_module_failure(self, text: str) -> None:
         """Plan §10 / HAWK issue #292: EXO module gets into a 'cannot be

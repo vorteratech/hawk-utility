@@ -35,6 +35,7 @@ export function EngagementPage() {
   const [authStep, setAuthStep] = useState<string | null>(null)
   const [authComplete, setAuthComplete] = useState(false)
   const [exoDirty, setExoDirty] = useState(false)
+  const [crashedExitCode, setCrashedExitCode] = useState<number | null>(null)
   const [tab, setTab] = useState<'console' | 'files'>('console')
 
   // Sync from server on initial load (in case the WS stream missed the
@@ -61,6 +62,11 @@ export function EngagementPage() {
     } else if (evt.type === 'exo_module_recovered') {
       setExoDirty(false)
       qc.invalidateQueries({ queryKey: ['engagement', id] })
+    } else if (evt.type === 'engagement_crashed') {
+      setCrashedExitCode(evt.exit_code)
+      qc.invalidateQueries({ queryKey: ['engagement', id] })
+      qc.invalidateQueries({ queryKey: ['engagements'] })
+      qc.invalidateQueries({ queryKey: ['active-engagement'] })
     } else if (evt.type === 'run_started' || evt.type === 'run_finished') {
       qc.invalidateQueries({ queryKey: ['engagement', id] })
     }
@@ -128,6 +134,9 @@ export function EngagementPage() {
         </div>
       </header>
 
+      {(crashedExitCode !== null || eng.status === 'crashed') && (
+        <CrashedBanner exitCode={crashedExitCode} />
+      )}
       {exoDirty && <ExoFailureBanner engagementId={id} onCleared={() => setExoDirty(false)} />}
 
       <div className="mb-4 flex items-center gap-1 border-b border-[var(--color-border)]">
@@ -166,6 +175,23 @@ export function EngagementPage() {
         deviceCode={deviceCode}
         onDismiss={() => setDeviceCode(null)}
       />
+    </div>
+  )
+}
+
+function CrashedBanner({ exitCode }: { exitCode: number | null }) {
+  return (
+    <div className="mb-4 rounded-lg border border-[var(--color-danger)] bg-[color-mix(in_srgb,var(--color-danger)_12%,transparent)] p-4">
+      <p className="text-sm font-medium text-[var(--color-danger)]">
+        Subprocess died unexpectedly
+        {exitCode !== null && exitCode !== 0 ? ` (exit ${exitCode})` : ''}
+      </p>
+      <p className="text-xs text-[var(--color-muted)] mt-1 max-w-2xl">
+        The pwsh process backing this engagement is no longer running. Any
+        in-flight runs were marked interrupted. Output already on disk is
+        preserved; you can still browse the Files tab and download the
+        engagement zip. To collect more data, start a new engagement.
+      </p>
     </div>
   )
 }

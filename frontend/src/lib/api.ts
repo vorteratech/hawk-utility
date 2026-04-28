@@ -60,6 +60,7 @@ export type ConsoleEvent =
 export type StateEvent =
   | { type: 'engagement_started'; engagement_id: number; ts: string }
   | { type: 'engagement_ended'; engagement_id: number; ts: string }
+  | { type: 'engagement_crashed'; engagement_id: number; exit_code: number; ts: string }
   | { type: 'run_started'; run_id: number; cmdlet: string; clean_invocation: string; ts: string }
   | { type: 'run_finished'; run_id: number; status: Run['status']; detail: string; ts: string }
   | { type: 'device_code'; url: string; code: string; target: 'graph' | 'exo' | null; ts: string }
