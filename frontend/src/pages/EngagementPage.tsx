@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type ConsoleLine, type Run, type StateEvent } from '../lib/api'
+import { api, filesApi, type ConsoleLine, type Run, type StateEvent } from '../lib/api'
 import { useConsoleStream, useStateStream } from '../lib/ws'
 import { Button, Card, Err, Modal, StatusBadge } from '../components/ui'
 import { FilesTab } from './FilesTab'
@@ -110,6 +110,14 @@ export function EngagementPage() {
           )}
         </div>
         <div className="flex gap-2">
+          <a
+            href={filesApi.zipUrl(id)}
+            download
+            className="text-sm px-3 py-1.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] text-[var(--color-text)]"
+            title="Download the engagement folder as a .zip — unit of forensic handoff (plan §6.3)"
+          >
+            Download Engagement (.zip)
+          </a>
           <Button
             variant="danger"
             onClick={() => end.mutate()}

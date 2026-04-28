@@ -175,4 +175,6 @@ export const filesApi = {
     ),
   downloadUrl: (engagementId: number, path: string) =>
     `/api/engagements/${engagementId}/files/download?path=${encodeURIComponent(path)}`,
+  zipUrl: (engagementId: number) =>
+    `/api/engagements/${engagementId}/zip`,
 }

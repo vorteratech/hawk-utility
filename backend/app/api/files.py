@@ -3,12 +3,13 @@ from __future__ import annotations
 import csv
 import io
 import os
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from app.db import get_conn
 
@@ -201,3 +202,50 @@ def download_file(engagement_id: int, path: str = Query(...)):
         filename=target.name,
         media_type="application/octet-stream",
     )
+
+
+@router.get("/{engagement_id}/zip")
+def download_engagement_zip(engagement_id: int) -> StreamingResponse:
+    """Stream the entire engagement folder as a .zip download. Plan §6.3:
+    this is the unit of forensic handoff -- the team unzips on their side
+    and continues their existing workflow."""
+    folder = _engagement_folder(engagement_id)
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT client_name, created_at FROM engagements WHERE id = ?",
+            (engagement_id,),
+        ).fetchone()
+
+    safe_client = "engagement"
+    if row and row["client_name"]:
+        safe_client = "".join(
+            c if c.isalnum() or c in "-_" else "_" for c in row["client_name"]
+        ).strip("_") or "engagement"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    zip_name = f"{safe_client}_{engagement_id}_{stamp}.zip"
+
+    # Build the whole zip in-memory, then stream. HAWK engagement folders
+    # are typically <500 MB; trying to yield mid-zip while ZipFile is still
+    # writing the central directory produces a malformed file (some readers
+    # warn 'extra bytes at beginning'). Single buffer, single hand-off keeps
+    # the zip structurally clean.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=3) as zf:
+        for path in sorted(folder.rglob("*")):
+            if not path.is_file():
+                continue
+            zf.write(path, arcname=str(path.relative_to(folder)))
+    buf.seek(0)
+
+    def gen() -> Iterator[bytes]:
+        chunk = buf.read(64 * 1024)
+        while chunk:
+            yield chunk
+            chunk = buf.read(64 * 1024)
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{zip_name}"',
+        "Content-Length": str(buf.getbuffer().nbytes),
+    }
+    return StreamingResponse(gen(), media_type="application/zip", headers=headers)
