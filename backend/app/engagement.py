@@ -37,21 +37,34 @@ DEVICE_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# When a Microsoft.Graph cmdlet 403s with 'Your tenant is not licensed for
-# this feature', HAWK swallows the error and keeps going. We surface a
-# friendly explanation in the console so the investigator doesn't have to
-# parse the raw HTTP error trail.
-TENANT_UNLICENSED_RE = re.compile(
-    r"^(?P<cmd>Get-Mg\w+(?:_\w+)?)\s*:\s*Your tenant is not licensed for this feature",
-    re.IGNORECASE,
-)
+# When a Microsoft.Graph cmdlet 403s because the tenant lacks the licensed
+# feature, HAWK swallows the error and keeps going. We surface a friendly
+# explanation in the console so the investigator doesn't have to parse
+# the raw HTTP error trail. Multiple wordings show up in the wild --
+# match any of them.
+TENANT_UNLICENSED_RES = [
+    re.compile(
+        r"^(?P<cmd>(?:Get-Mg|Get-Hawk)[\w-]+(?:_\w+)?)\s*:\s*Your tenant is not licensed for this feature",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?P<cmd>(?:Get-Mg|Get-Hawk)[\w-]+(?:_\w+)?)\s*:\s*Tenant is not a B2C tenant and doesn't have premium license",
+        re.IGNORECASE,
+    ),
+]
 
 # Cmdlet -> human label + license SKU known to be required.
 KNOWN_PREMIUM_FEATURES: dict[str, tuple[str, str]] = {
     "Get-MgRiskyUser_List": ("Risky Users", "Microsoft Entra ID P2"),
     "Get-MgRiskDetection_List": ("Risk Detections", "Microsoft Entra ID P2"),
     "Get-MgRiskyServicePrincipal_List": ("Risky Service Principals", "Microsoft Entra ID P2"),
+    "Get-HawkUserEntraIDSignInLog": ("Entra ID Sign-In Logs", "Microsoft Entra ID P1 or P2"),
 }
+
+# Microsoft Graph 429 throttling. HAWK doesn't retry; the run dies via our
+# wrapper sentinel. Surface a hint so the investigator knows this is
+# transient and not a wrapper bug.
+THROTTLED_RE = re.compile(r"Response status code does not indicate success:\s*429", re.IGNORECASE)
 
 # Last N lines kept in memory for late WebSocket joiners (plan §5.2 step 6).
 RING_BUFFER_SIZE = 1000
@@ -282,6 +295,7 @@ class EngagementProcess:
             await self._check_device_code(text)
             await self._check_exo_module_failure(text)
             await self._check_tenant_unlicensed(text)
+            await self._check_throttled(text)
             if _is_wrapper_noise(text):
                 # Still write to the run log file for forensic completeness;
                 # don't fan out to console subscribers.
@@ -377,16 +391,32 @@ class EngagementProcess:
         """Translate raw Graph SDK 'tenant not licensed' 403s into a single
         friendly meta-line so investigators don't have to read the HTTP
         diagnostic dump to understand what was skipped."""
-        m = TENANT_UNLICENSED_RE.search(text)
-        if not m:
+        cmd = None
+        for pattern in TENANT_UNLICENSED_RES:
+            m = pattern.search(text)
+            if m:
+                cmd = m.group("cmd")
+                break
+        if cmd is None:
             return
-        cmd = m.group("cmd")
         feature, sku = KNOWN_PREMIUM_FEATURES.get(
-            cmd, (cmd, "a premium SKU (typically Microsoft Entra ID P2)")
+            cmd, (cmd, "a premium SKU (typically Microsoft Entra ID P1 or P2)")
         )
         await self._emit_meta(
             f"[wrapper] Skipping {feature}: this tenant is not licensed for it "
             f"(needs {sku}). HAWK will continue with the remaining cmdlets."
+        )
+
+    async def _check_throttled(self, text: str) -> None:
+        """Surface Microsoft Graph 429s as transient and recoverable so the
+        investigator doesn't read the run-failed status as a wrapper bug."""
+        if not THROTTLED_RE.search(text):
+            return
+        await self._emit_meta(
+            "[wrapper] Microsoft Graph throttled this request (HTTP 429 Too "
+            "Many Requests). This is transient -- wait 5-10 minutes for "
+            "the rate-limit window to reset, then re-run. Any data already "
+            "written to disk before the throttle is preserved in the engagement folder."
         )
 
     async def _check_exo_module_failure(self, text: str) -> None:
