@@ -133,7 +133,7 @@ def check_hawk() -> CheckResult:
         "HAWK",
         "HAWK module 4.0+",
         MIN_HAWK,
-        "Install-Module -Name HAWK -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
+        "Install-PSResource -Name HAWK -Repository PSGallery -TrustRepository -Scope CurrentUser",
     )
 
 
@@ -143,7 +143,7 @@ def check_exo() -> CheckResult:
         "ExchangeOnlineManagement",
         "ExchangeOnlineManagement 2.0.4+",
         MIN_EXO,
-        "Install-Module -Name ExchangeOnlineManagement -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
+        "Install-PSResource -Name ExchangeOnlineManagement -Repository PSGallery -TrustRepository -Scope CurrentUser",
     )
 
 
@@ -156,7 +156,7 @@ def check_graph() -> CheckResult:
         "Microsoft.Graph",
         "Microsoft.Graph",
         MIN_GRAPH,
-        "Install-Module -Name Microsoft.Graph -RequiredVersion 2.25.0 -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
+        "Install-PSResource -Name Microsoft.Graph -Version '[2.25.0,2.25.0]' -Repository PSGallery -TrustRepository -Scope CurrentUser",
     )
 
 

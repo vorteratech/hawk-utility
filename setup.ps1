@@ -88,38 +88,25 @@ Write-Host "  This pulls ~30 Graph submodules and can take 5+ minutes." -Foregro
 # Force TLS 1.2 -- fresh Windows defaults are often too old for PSGallery.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-# Bootstrap NuGet provider DLL directly. Install-PackageProvider can't
-# fetch it the normal way when PSGallery is in the 'blank SourceLocation'
-# fresh-Windows state, and Register-PSRepository -Default itself requires
-# the NuGet provider -- so we side-step both by pulling the provider DLL
-# straight from Microsoft's CDN into the per-user provider folder, then
-# loading it.
-$nugetProviderDir = Join-Path $env:LOCALAPPDATA 'PackageManagement\ProviderAssemblies\NuGet\2.8.5.208'
-$nugetProviderDll = Join-Path $nugetProviderDir 'Microsoft.PackageManagement.NuGetProvider.dll'
-if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
-          Where-Object Version -ge ([version]'2.8.5.201'))) {
-    Write-Host "  - NuGet provider missing; downloading directly..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Path $nugetProviderDir -Force | Out-Null
-    Invoke-WebRequest `
-        -Uri 'https://onegetcdn.azureedge.net/providers/Microsoft.PackageManagement.NuGetProvider-2.8.5.208.dll' `
-        -OutFile $nugetProviderDll `
-        -UseBasicParsing
-    Import-PackageProvider -Name NuGet -Force | Out-Null
+# Use Microsoft.PowerShell.PSResourceGet (Install-PSResource) instead of
+# the legacy PowerShellGet stack. The legacy chain (Install-PackageProvider
+# -> NuGet provider download -> Register-PSRepository -> Set-PSRepository
+# -> Install-Module) is broken on fresh PS 7 VMs: the onegetcdn endpoint
+# Microsoft used to host the NuGet provider DLL is now retired, and
+# Register-PSRepository -Default itself needs the NuGet provider, which
+# we can't bootstrap. PSResourceGet ships built-in with PS 7.4+ and uses
+# direct HTTPS to PSGallery -- no NuGet provider required.
+if (-not (Get-Command Install-PSResource -ErrorAction SilentlyContinue)) {
+    throw "PowerShell 7.4+ with Install-PSResource is required. Detected: $($PSVersionTable.PSVersion). Re-launch setup.ps1 in a fresh pwsh window after winget finishes installing PowerShell 7."
 }
 
-# Now PSGallery can actually be (re-)registered. On some fresh Windows
-# installs PSGallery exists but with a blank SourceLocation, which makes
-# Install-Module die with 'Unable to find repository'. Fix by reset.
-$psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
-if (-not $psGallery -or [string]::IsNullOrWhiteSpace($psGallery.SourceLocation)) {
-    Write-Host "  - PSGallery missing or has blank SourceLocation; re-registering..." -ForegroundColor Yellow
-    Unregister-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
-    Register-PSRepository -Default
-}
-
-# Trust PSGallery so Install-Module doesn't prompt.
-if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -ne 'Trusted') {
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+# Make sure PSGallery is registered (and trusted) for PSResourceGet's repo store.
+$psGallery = Get-PSResourceRepository -Name PSGallery -ErrorAction SilentlyContinue
+if (-not $psGallery) {
+    Write-Host "  - Registering PSGallery for PSResourceGet..." -ForegroundColor Yellow
+    Register-PSResourceRepository -PSGallery -Trusted -Force
+} elseif (-not $psGallery.Trusted) {
+    Set-PSResourceRepository -Name PSGallery -Trusted
 }
 
 # Microsoft.Graph 2.36.1 ships a broken Authentication.Core (TypeLoadException
@@ -130,14 +117,14 @@ if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolic
 # uninstall any other version present.
 $GraphPinnedVersion = '2.25.0'
 
-# CurrentUser scope sidesteps the AllUsers PackageManagement lock issues
-# that hit shared machines where modules are open in another process.
+# CurrentUser scope sidesteps the AllUsers module-lock issues that hit
+# shared machines.
 $existingHawk = Get-Module -ListAvailable -Name HAWK | Sort-Object Version -Descending | Select-Object -First 1
 if ($existingHawk) {
     Write-Host "  - HAWK $($existingHawk.Version) already installed" -ForegroundColor DarkGray
 } else {
     Write-Host "  - HAWK installing..." -ForegroundColor Yellow
-    Install-Module -Name HAWK -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
+    Install-PSResource -Name HAWK -Repository PSGallery -TrustRepository -Scope CurrentUser -Reinstall:$false
 }
 
 # Always remove non-pinned Graph versions, even if the pinned one is
@@ -151,13 +138,13 @@ if ($stale) {
     $stale | Group-Object Name | ForEach-Object {
         $modName = $_.Name
         $_.Group | ForEach-Object {
-            Uninstall-Module -Name $modName -RequiredVersion $_.Version -Force -ErrorAction SilentlyContinue
+            Uninstall-PSResource -Name $modName -Version "[$($_.Version),$($_.Version)]" -Scope CurrentUser -ErrorAction SilentlyContinue
         }
     }
-    # Belt-and-braces: nuke leftover folders Uninstall-Module sometimes
-    # misses. Includes OneDrive-synced module paths because OneDrive
-    # redirects %USERPROFILE%\Documents to %USERPROFILE%\OneDrive\Documents
-    # on machines where OneDrive has folder backup enabled.
+    # Belt-and-braces: nuke leftover folders Uninstall sometimes misses.
+    # Includes OneDrive-synced module paths because OneDrive redirects
+    # %USERPROFILE%\Documents to %USERPROFILE%\OneDrive\Documents on
+    # machines where OneDrive has folder backup enabled.
     @(
         "$env:USERPROFILE\OneDrive\Documents\PowerShell\Modules",
         "$env:USERPROFILE\OneDrive\Documents\WindowsPowerShell\Modules",
@@ -182,7 +169,7 @@ if ($existingGraph) {
     Write-Host "  - Microsoft.Graph $GraphPinnedVersion already installed" -ForegroundColor DarkGray
 } else {
     Write-Host "  - Microsoft.Graph $GraphPinnedVersion installing (this is the slow one)..." -ForegroundColor Yellow
-    Install-Module -Name Microsoft.Graph -RequiredVersion $GraphPinnedVersion -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
+    Install-PSResource -Name Microsoft.Graph -Version "[$GraphPinnedVersion,$GraphPinnedVersion]" -Repository PSGallery -TrustRepository -Scope CurrentUser -Reinstall:$false
 }
 
 # --- 3. Backend ----------------------------------------------------------
