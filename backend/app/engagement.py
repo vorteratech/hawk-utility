@@ -37,6 +37,22 @@ DEVICE_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# When a Microsoft.Graph cmdlet 403s with 'Your tenant is not licensed for
+# this feature', HAWK swallows the error and keeps going. We surface a
+# friendly explanation in the console so the investigator doesn't have to
+# parse the raw HTTP error trail.
+TENANT_UNLICENSED_RE = re.compile(
+    r"^(?P<cmd>Get-Mg\w+(?:_\w+)?)\s*:\s*Your tenant is not licensed for this feature",
+    re.IGNORECASE,
+)
+
+# Cmdlet -> human label + license SKU known to be required.
+KNOWN_PREMIUM_FEATURES: dict[str, tuple[str, str]] = {
+    "Get-MgRiskyUser_List": ("Risky Users", "Microsoft Entra ID P2"),
+    "Get-MgRiskDetection_List": ("Risk Detections", "Microsoft Entra ID P2"),
+    "Get-MgRiskyServicePrincipal_List": ("Risky Service Principals", "Microsoft Entra ID P2"),
+}
+
 # Last N lines kept in memory for late WebSocket joiners (plan §5.2 step 6).
 RING_BUFFER_SIZE = 1000
 
@@ -265,6 +281,7 @@ class EngagementProcess:
             await self._check_auth_markers(text)
             await self._check_device_code(text)
             await self._check_exo_module_failure(text)
+            await self._check_tenant_unlicensed(text)
             if _is_wrapper_noise(text):
                 # Still write to the run log file for forensic completeness;
                 # don't fan out to console subscribers.
@@ -355,6 +372,22 @@ class EngagementProcess:
                     self._sentinel_event.set()
                 self._terminated = True
                 return
+
+    async def _check_tenant_unlicensed(self, text: str) -> None:
+        """Translate raw Graph SDK 'tenant not licensed' 403s into a single
+        friendly meta-line so investigators don't have to read the HTTP
+        diagnostic dump to understand what was skipped."""
+        m = TENANT_UNLICENSED_RE.search(text)
+        if not m:
+            return
+        cmd = m.group("cmd")
+        feature, sku = KNOWN_PREMIUM_FEATURES.get(
+            cmd, (cmd, "a premium SKU (typically Microsoft Entra ID P2)")
+        )
+        await self._emit_meta(
+            f"[wrapper] Skipping {feature}: this tenant is not licensed for it "
+            f"(needs {sku}). HAWK will continue with the remaining cmdlets."
+        )
 
     async def _check_exo_module_failure(self, text: str) -> None:
         """Plan §10 / HAWK issue #292: EXO module gets into a 'cannot be
