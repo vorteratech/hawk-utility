@@ -94,9 +94,9 @@ export function EngagementPage() {
             <p className="text-xs text-[var(--color-muted)] mt-1">
               {!authStep && 'Spawning subprocess…'}
               {authStep === 'importing_modules' &&
-                'Importing Microsoft.Graph + ExchangeOnlineManagement modules — this can take 60–90 seconds on a fresh VM…'}
-              {authStep === 'graph_starting' && 'Modules loaded — connecting to Microsoft Graph. A browser window will open for sign-in.'}
-              {authStep === 'graph_done' && 'Microsoft Graph connected — opening the second sign-in window for Exchange Online…'}
+                'Connecting to Microsoft Graph — first device code coming in a few seconds…'}
+              {authStep === 'graph_starting' && 'Connecting to Microsoft Graph — device code coming…'}
+              {authStep === 'graph_done' && 'Microsoft Graph connected — second device code coming for Exchange Online…'}
               {authStep === 'exo_done' && 'Both modules connected.'}
             </p>
           )}

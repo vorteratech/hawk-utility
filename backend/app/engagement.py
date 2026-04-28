@@ -359,11 +359,11 @@ class EngagementProcess:
         """Run the Graph + EXO connect sequence inside this engagement.
 
         Plan §5.1: Graph FIRST (avoids the MSAL/WAM conflict), then EXO.
-        v1.1 switched from device-code to interactive browser auth: EXO 3.x
-        renamed the device-code parameter (-DeviceAuthentication is gone),
-        and the device-code UX adds a step the team didn't want anyway.
-        Interactive auth opens the system default browser on the VM; the
-        investigator signs in normally (username, password, 2FA).
+        Both use device-code flow -- this is reliable from a piped subprocess
+        (interactive browser auth tends to hang waiting for a console MSAL
+        thinks it can't reach). EXO 3.x uses '-Device' for the device-code
+        parameter; the plan doc's '-DeviceAuthentication' is from EXO 2.x
+        and was removed.
         """
         if self._auth_complete:
             return ("succeeded", "already authenticated")
@@ -377,20 +377,23 @@ class EngagementProcess:
         self._auth_target = "graph"
         await self._emit_state({"type": "auth_step", "step": "importing_modules"})
 
-        # *>&1 routes Information/Warning/Verbose streams into Success so all
-        # Connect output (including any prompts from older module versions)
-        # reaches our subprocess pipe.
+        # No explicit Import-Module up front. PowerShell auto-loads
+        # Microsoft.Graph.Authentication on the first Connect-MgGraph call,
+        # ExchangeOnlineManagement on the first Connect-ExchangeOnline call,
+        # and HAWK on the first Get-Hawk* call. Importing the Microsoft.Graph
+        # meta-module pulls 30+ submodules (60-90s on a fresh VM) and is
+        # unnecessary -- we only use the Authentication submodule for the
+        # connect itself.
+        # *>&1 folds Information/Warning/Verbose into Success so the device
+        # code prompt (Write-Host in some module versions) hits our pipe.
         invocation = (
-            "Import-Module Microsoft.Graph -ErrorAction Stop *>&1; "
-            "Import-Module ExchangeOnlineManagement -ErrorAction Stop *>&1; "
-            "Import-Module HAWK -ErrorAction Stop *>&1; "
             "Write-Output '__HAWK_AUTH_MODULES_LOADED__'; "
-            f"Connect-MgGraph -NoWelcome -Scopes {scopes_pwsh} *>&1; "
+            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
-            "Connect-ExchangeOnline -ShowBanner:$false *>&1; "
+            "Connect-ExchangeOnline -Device -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
-        clean = "Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
+        clean = "Connect-MgGraph -UseDeviceCode ; Connect-ExchangeOnline -Device"
         script = make_run_script(invocation)
 
         run_id = await self.register_run(
