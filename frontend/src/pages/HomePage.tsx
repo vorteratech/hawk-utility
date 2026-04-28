@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Engagement, type SystemInfo } from '../lib/api'
 import { Button, Card, Err, Kv, Modal, StatusBadge } from '../components/ui'
+import { Brand } from '../components/Brand'
 import { SystemStatusCard } from './SystemStatusCard'
 
 function NewEngagementModal({
@@ -251,12 +252,7 @@ export function HomePage() {
   return (
     <div className="min-h-screen px-6 py-8 max-w-5xl mx-auto">
       <header className="mb-8 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">HAWK Wrapper</h1>
-          <p className="text-sm text-[var(--color-muted)] mt-1">
-            M365 forensics orchestration · v0.1.0
-          </p>
-        </div>
+        <Brand />
         <div className="flex items-center gap-2">
           {activeId !== null && (
             <Link

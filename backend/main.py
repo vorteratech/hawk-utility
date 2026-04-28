@@ -44,7 +44,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="HAWK Wrapper", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="HAWK Wrapper", version="1.0.0", lifespan=lifespan)
 
 # Vite dev server runs on 5173. Production GUI is served from the same origin
 # as the API (uvicorn binds 127.0.0.1:8000) so CORS is only needed in dev.
