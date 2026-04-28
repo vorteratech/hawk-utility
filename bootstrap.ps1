@@ -131,8 +131,13 @@ if ($stale) {
             Uninstall-Module -Name $modName -RequiredVersion $_.Version -Force -ErrorAction SilentlyContinue
         }
     }
-    # Belt-and-braces: nuke leftover folders Uninstall-Module sometimes misses.
+    # Belt-and-braces: nuke leftover folders Uninstall-Module sometimes
+    # misses. Includes OneDrive-synced module paths because OneDrive
+    # redirects %USERPROFILE%\Documents to %USERPROFILE%\OneDrive\Documents
+    # on machines where OneDrive has folder backup enabled.
     @(
+        "$env:USERPROFILE\OneDrive\Documents\PowerShell\Modules",
+        "$env:USERPROFILE\OneDrive\Documents\WindowsPowerShell\Modules",
         "$env:USERPROFILE\Documents\PowerShell\Modules",
         "$env:USERPROFILE\Documents\WindowsPowerShell\Modules",
         "C:\Program Files\PowerShell\Modules",
