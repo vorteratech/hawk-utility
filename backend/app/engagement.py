@@ -359,11 +359,11 @@ class EngagementProcess:
         """Run the Graph + EXO connect sequence inside this engagement.
 
         Plan §5.1: Graph FIRST (avoids the MSAL/WAM conflict), then EXO.
-        Both use device-code flow -- this is reliable from a piped subprocess
-        (interactive browser auth tends to hang waiting for a console MSAL
-        thinks it can't reach). EXO 3.x uses '-Device' for the device-code
-        parameter; the plan doc's '-DeviceAuthentication' is from EXO 2.x
-        and was removed.
+        Both use interactive browser auth: Connect-MgGraph and
+        Connect-ExchangeOnline without device-code flags pop the system
+        default browser to login.microsoftonline.com; the investigator
+        completes username + password + 2FA there. Confirmed working
+        end-to-end on the test VM.
         """
         if self._auth_complete:
             return ("succeeded", "already authenticated")
@@ -379,21 +379,19 @@ class EngagementProcess:
 
         # No explicit Import-Module up front. PowerShell auto-loads
         # Microsoft.Graph.Authentication on the first Connect-MgGraph call,
-        # ExchangeOnlineManagement on the first Connect-ExchangeOnline call,
-        # and HAWK on the first Get-Hawk* call. Importing the Microsoft.Graph
-        # meta-module pulls 30+ submodules (60-90s on a fresh VM) and is
-        # unnecessary -- we only use the Authentication submodule for the
-        # connect itself.
-        # *>&1 folds Information/Warning/Verbose into Success so the device
-        # code prompt (Write-Host in some module versions) hits our pipe.
+        # ExchangeOnlineManagement on the first Connect-ExchangeOnline call.
+        # Importing the Microsoft.Graph meta-module pulls 30+ submodules
+        # (60-90s on a fresh VM) and is unnecessary for the connect itself.
+        # *>&1 folds Information/Warning/Verbose into Success so any prompts
+        # or progress text hit our pipe.
         invocation = (
             "Write-Output '__HAWK_AUTH_MODULES_LOADED__'; "
-            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh} *>&1; "
+            f"Connect-MgGraph -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
-            "Connect-ExchangeOnline -Device -ShowBanner:$false *>&1; "
+            "Connect-ExchangeOnline -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
-        clean = "Connect-MgGraph -UseDeviceCode ; Connect-ExchangeOnline -Device"
+        clean = "Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
         script = make_run_script(invocation)
 
         run_id = await self.register_run(

@@ -94,9 +94,9 @@ export function EngagementPage() {
             <p className="text-xs text-[var(--color-muted)] mt-1">
               {!authStep && 'Spawning subprocess…'}
               {authStep === 'importing_modules' &&
-                'Connecting to Microsoft Graph — first device code coming in a few seconds…'}
-              {authStep === 'graph_starting' && 'Connecting to Microsoft Graph — device code coming…'}
-              {authStep === 'graph_done' && 'Microsoft Graph connected — second device code coming for Exchange Online…'}
+                'Connecting to Microsoft Graph — a browser window will open for sign-in (username, password, 2FA)…'}
+              {authStep === 'graph_starting' && 'Microsoft Graph sign-in in progress — complete it in the browser window…'}
+              {authStep === 'graph_done' && 'Microsoft Graph connected — opening sign-in for Exchange Online…'}
               {authStep === 'exo_done' && 'Both modules connected.'}
             </p>
           )}
@@ -119,6 +119,9 @@ export function EngagementPage() {
         <div className="space-y-4">
           <CmdletPickerCard
             engagementId={id}
+            startDate={eng.start_date}
+            endDate={eng.end_date}
+            outputFolder={eng.output_folder}
             disabled={!cmdletsEnabled}
             disabledReason={
               !isActive ? 'Engagement ended' : !authComplete ? 'Waiting for device-code auth' : undefined
@@ -305,10 +308,16 @@ function ConsolePane({
 
 function CmdletPickerCard({
   engagementId,
+  startDate,
+  endDate,
+  outputFolder,
   disabled,
   disabledReason,
 }: {
   engagementId: number
+  startDate: string
+  endDate: string
+  outputFolder: string
   disabled: boolean
   disabledReason?: string
 }) {
@@ -319,31 +328,67 @@ function CmdletPickerCard({
     onSuccess: () => qc.invalidateQueries({ queryKey: ['engagement', engagementId] }),
   })
 
+  const runTenant = () =>
+    run.mutate({
+      cmdlet: 'Start-HawkTenantInvestigation',
+      params: {
+        StartDate: startDate,
+        EndDate: endDate,
+        FilePath: outputFolder,
+      },
+    })
+
   return (
     <Card
       title="Run Cmdlet"
-      subtitle={disabled && disabledReason ? disabledReason : 'HAWK pickers land in M5/M6'}
+      subtitle={
+        disabled && disabledReason
+          ? disabledReason
+          : `${startDate} → ${endDate} · output in engagement folder`
+      }
     >
-      <div className="space-y-2">
+      <div className="space-y-3">
         <Button
-          onClick={() => run.mutate({ cmdlet: 'Get-Date', params: {} })}
+          onClick={runTenant}
           disabled={disabled || run.isPending}
+          variant="primary"
           className="w-full"
+          title="Runs Start-HawkTenantInvestigation across the engagement's date range"
         >
-          Get-Date (smoke test)
+          {run.isPending ? 'Starting…' : 'Run Tenant Investigation'}
         </Button>
-        <Button
-          onClick={() =>
-            run.mutate({
-              cmdlet: '($PSVersionTable.PSVersion).ToString()',
-              params: {},
-            })
-          }
-          disabled={disabled || run.isPending}
-          className="w-full"
-        >
-          $PSVersionTable
-        </Button>
+        <p className="text-[11px] text-[var(--color-muted)] leading-snug">
+          Runs Start-HawkTenantInvestigation -StartDate {startDate} -EndDate{' '}
+          {endDate} -FilePath &lt;engagement folder&gt;. HAWK 4.0's
+          non-interactive mode kicks in automatically when these are passed.
+          User Investigation lands in M6.
+        </p>
+        <details className="text-xs text-[var(--color-muted)]">
+          <summary className="cursor-pointer select-none hover:text-[var(--color-text)]">
+            Smoke tests
+          </summary>
+          <div className="mt-2 space-y-2">
+            <Button
+              onClick={() => run.mutate({ cmdlet: 'Get-Date', params: {} })}
+              disabled={disabled || run.isPending}
+              className="w-full"
+            >
+              Get-Date
+            </Button>
+            <Button
+              onClick={() =>
+                run.mutate({
+                  cmdlet: '($PSVersionTable.PSVersion).ToString()',
+                  params: {},
+                })
+              }
+              disabled={disabled || run.isPending}
+              className="w-full"
+            >
+              $PSVersionTable
+            </Button>
+          </div>
+        </details>
         {run.error && <Err msg={String(run.error)} />}
       </div>
     </Card>
