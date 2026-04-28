@@ -103,8 +103,16 @@ class EngagementProcess:
     async def start(self) -> None:
         # TERM=dumb tells PSReadLine not to emit bracketed-paste / cursor
         # ANSI escape sequences, which keeps stdout parseable for sentinel
-        # detection.
-        env = {**os.environ, "TERM": "dumb"}
+        # detection. PYTHONIOENCODING + console codepage env vars push pwsh
+        # to UTF-8 stdout so HAWK's emoji output renders correctly instead
+        # of as '??'.
+        env = {
+            **os.environ,
+            "TERM": "dumb",
+            "PYTHONIOENCODING": "utf-8",
+            # PowerShell respects this for the console codepage on Windows.
+            "POWERSHELL_TELEMETRY_OPTOUT": "1",
+        }
         kwargs: dict = {
             "stdin": asyncio.subprocess.PIPE,
             "stdout": asyncio.subprocess.PIPE,
@@ -140,6 +148,15 @@ class EngagementProcess:
         )
         await self._emit_state({"type": "engagement_started", "engagement_id": self.engagement_id})
         await self._emit_meta(f"[wrapper] pwsh subprocess started, pid={self._proc.pid}")
+
+        # Flip the pwsh REPL into UTF-8 output mode so HAWK's emoji and
+        # other non-ASCII output renders correctly instead of as '??'.
+        # Suppress this from the visible console (echo=False).
+        await self.send_stdin(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+            "$OutputEncoding = [System.Text.Encoding]::UTF8",
+            echo=False,
+        )
 
         # Persist pid.
         with get_conn() as conn:
@@ -368,10 +385,21 @@ class EngagementProcess:
         if self._auth_complete:
             return ("succeeded", "already authenticated")
         if graph_scopes is None:
-            # Conservative starting set per plan §11. Real-world tenant tests
-            # may surface that we need more (User.Read.All, etc.) -- expand
-            # here when that lands.
-            graph_scopes = ["AuditLog.Read.All", "Directory.Read.All"]
+            # Scope set verified against a real tenant (plan §11 #1):
+            #   AuditLog.Read.All + Directory.Read.All  - covered the bulk
+            #   of Get-HawkTenant* cmdlets (config, audit logs, admin lists,
+            #   OAuth grants, etc.)
+            #   IdentityRiskyUser.Read.All  - Get-HawkTenantRiskyUsers
+            #   IdentityRiskEvent.Read.All  - Get-HawkTenantRiskDetections
+            # Without the last two, those two cmdlets 403 with 'required
+            # scopes are missing'; the rest of the investigation completes
+            # fine.
+            graph_scopes = [
+                "AuditLog.Read.All",
+                "Directory.Read.All",
+                "IdentityRiskyUser.Read.All",
+                "IdentityRiskEvent.Read.All",
+            ]
 
         scopes_pwsh = ",".join(f"'{s}'" for s in graph_scopes)
         self._auth_target = "graph"
