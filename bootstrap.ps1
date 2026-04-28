@@ -19,6 +19,21 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message" -ForegroundColor Cyan
 }
 
+# If we're running under Windows PowerShell 5.1, anything we Install-Module
+# would land in WindowsPowerShell\Modules and be invisible to pwsh 7 (which
+# the wrapper backend uses). Re-launch under pwsh if it's already on the
+# system; otherwise winget will install it below and we'll re-launch on the
+# next bootstrap run.
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
+        Write-Host "Detected Windows PowerShell 5.1 -- re-launching bootstrap in PowerShell 7..." -ForegroundColor Yellow
+        & pwsh -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath
+        exit $LASTEXITCODE
+    } else {
+        Write-Host "Running under Windows PowerShell 5.1. Installing PowerShell 7 first; you'll then need to close this window and re-run bootstrap from a fresh 'pwsh' window so module installs land in the PS 7 path." -ForegroundColor Yellow
+    }
+}
+
 function Refresh-Path {
     $machine = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user = [System.Environment]::GetEnvironmentVariable('Path', 'User')
