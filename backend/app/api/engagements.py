@@ -148,8 +148,30 @@ def get_engagement(engagement_id: int) -> dict:
 @router.post("/{engagement_id}/end")
 async def end_engagement(engagement_id: int) -> dict:
     eng = current()
-    if eng is None or eng.engagement_id != engagement_id:
-        raise HTTPException(404, "no active engagement with that id")
-    await eng.terminate()
-    await clear_current(eng)
-    return {"ok": True}
+    if eng is not None and eng.engagement_id == engagement_id:
+        await eng.terminate()
+        await clear_current(eng)
+        return {"ok": True}
+
+    # No live subprocess for this engagement. If the DB still has it as
+    # active/starting (zombie state from a wrapper restart, missed sweep,
+    # etc.), close it out cleanly so the UI isn't stuck on a dead row.
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT status FROM engagements WHERE id = ?", (engagement_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "engagement not found")
+        if row["status"] in ("starting", "active"):
+            now = _now_iso()
+            conn.execute(
+                "UPDATE engagements SET status='crashed', ended_at=?, pwsh_pid=NULL WHERE id=?",
+                (now, engagement_id),
+            )
+            conn.execute(
+                "UPDATE runs SET status='interrupted', ended_at=? "
+                "WHERE engagement_id = ? AND status IN ('queued', 'running')",
+                (now, engagement_id),
+            )
+            return {"ok": True, "note": "engagement was a zombie; marked crashed"}
+    return {"ok": True, "note": "engagement was already ended"}
