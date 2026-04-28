@@ -88,10 +88,28 @@ Write-Host "  This pulls ~30 Graph submodules and can take 5+ minutes." -Foregro
 # Force TLS 1.2 -- fresh Windows defaults are often too old for PSGallery.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-# Ensure PSGallery is registered with a valid SourceLocation. On some fresh
-# Windows installs the entry exists but the URL is blank, which makes
-# Install-PackageProvider fail with 'Unable to find repository with
-# SourceLocation'. Re-register from defaults to fix.
+# Bootstrap NuGet provider DLL directly. Install-PackageProvider can't
+# fetch it the normal way when PSGallery is in the 'blank SourceLocation'
+# fresh-Windows state, and Register-PSRepository -Default itself requires
+# the NuGet provider -- so we side-step both by pulling the provider DLL
+# straight from Microsoft's CDN into the per-user provider folder, then
+# loading it.
+$nugetProviderDir = Join-Path $env:LOCALAPPDATA 'PackageManagement\ProviderAssemblies\NuGet\2.8.5.208'
+$nugetProviderDll = Join-Path $nugetProviderDir 'Microsoft.PackageManagement.NuGetProvider.dll'
+if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+          Where-Object Version -ge ([version]'2.8.5.201'))) {
+    Write-Host "  - NuGet provider missing; downloading directly..." -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $nugetProviderDir -Force | Out-Null
+    Invoke-WebRequest `
+        -Uri 'https://onegetcdn.azureedge.net/providers/Microsoft.PackageManagement.NuGetProvider-2.8.5.208.dll' `
+        -OutFile $nugetProviderDll `
+        -UseBasicParsing
+    Import-PackageProvider -Name NuGet -Force | Out-Null
+}
+
+# Now PSGallery can actually be (re-)registered. On some fresh Windows
+# installs PSGallery exists but with a blank SourceLocation, which makes
+# Install-Module die with 'Unable to find repository'. Fix by reset.
 $psGallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
 if (-not $psGallery -or [string]::IsNullOrWhiteSpace($psGallery.SourceLocation)) {
     Write-Host "  - PSGallery missing or has blank SourceLocation; re-registering..." -ForegroundColor Yellow
@@ -102,13 +120,6 @@ if (-not $psGallery -or [string]::IsNullOrWhiteSpace($psGallery.SourceLocation))
 # Trust PSGallery so Install-Module doesn't prompt.
 if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -ne 'Trusted') {
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-}
-
-# Bootstrap NuGet provider quietly if missing. Done AFTER PSGallery is
-# valid so the provider download has somewhere to fetch from.
-if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
-          Where-Object Version -ge ([version]'2.8.5.201'))) {
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
 }
 
 # Microsoft.Graph 2.36.1 ships a broken Authentication.Core (TypeLoadException
