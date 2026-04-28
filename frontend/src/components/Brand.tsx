@@ -12,7 +12,7 @@ export function Brand() {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-6">
-        <VorteraLogo />
+        <VendettaLogo />
         <HawkBanner />
       </div>
       <p className="text-xs tracking-[0.35em] uppercase text-[var(--color-muted)] font-medium">
@@ -25,19 +25,19 @@ export function Brand() {
   )
 }
 
-function VorteraLogo() {
+function VendettaLogo() {
   const [errored, setErrored] = useState(false)
   if (errored) {
     return (
       <span className="text-xs text-[var(--color-muted)] italic">
-        (drop logo at frontend/public/vortera-logo.png)
+        (drop logo at frontend/public/vendetta-logo.png)
       </span>
     )
   }
   return (
     <img
-      src="/vortera-logo.png"
-      alt="Vortera Technologies"
+      src="/vendetta-logo.png"
+      alt="Vendetta"
       className="h-12 w-auto"
       onError={() => setErrored(true)}
     />
