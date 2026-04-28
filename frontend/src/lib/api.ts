@@ -63,7 +63,7 @@ export type StateEvent =
   | { type: 'run_started'; run_id: number; cmdlet: string; clean_invocation: string; ts: string }
   | { type: 'run_finished'; run_id: number; status: Run['status']; detail: string; ts: string }
   | { type: 'device_code'; url: string; code: string; target: 'graph' | 'exo' | null; ts: string }
-  | { type: 'auth_step'; step: 'graph_starting' | 'graph_done' | 'exo_done'; ts: string }
+  | { type: 'auth_step'; step: 'importing_modules' | 'graph_starting' | 'graph_done' | 'exo_done'; ts: string }
   | { type: 'auth_complete'; ts: string }
   | { type: 'error'; msg: string }
 
@@ -105,6 +105,11 @@ export const api = {
     }),
   endEngagement: (id: number) =>
     jsonFetch<{ ok: true }>(`/api/engagements/${id}/end`, { method: 'POST' }),
+  deleteEngagement: (id: number, deleteFolder = false) =>
+    jsonFetch<{ ok: true; folder_removed: boolean }>(
+      `/api/engagements/${id}?delete_folder=${deleteFolder}`,
+      { method: 'DELETE' },
+    ),
   createRun: (engagementId: number, body: { cmdlet: string; params: Record<string, unknown> }) =>
     jsonFetch<{ run: Run }>(`/api/engagements/${engagementId}/runs`, {
       method: 'POST',

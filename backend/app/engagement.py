@@ -263,7 +263,9 @@ class EngagementProcess:
         """Track which connect step finished so device-code events can be
         labeled correctly for the modal."""
         s = text.strip()
-        if s == AUTH_MARKER_GRAPH_OK:
+        if s == "__HAWK_AUTH_MODULES_LOADED__":
+            await self._emit_state({"type": "auth_step", "step": "graph_starting"})
+        elif s == AUTH_MARKER_GRAPH_OK:
             self._auth_target = "exo"
             await self._emit_state({"type": "auth_step", "step": "graph_done"})
         elif s == AUTH_MARKER_EXO_OK:
@@ -357,8 +359,11 @@ class EngagementProcess:
         """Run the Graph + EXO connect sequence inside this engagement.
 
         Plan §5.1: Graph FIRST (avoids the MSAL/WAM conflict), then EXO.
-        We watch stdout for device-code prompts and emit state events; the
-        UI surfaces them in a modal. Returns (status, detail) when done.
+        v1.1 switched from device-code to interactive browser auth: EXO 3.x
+        renamed the device-code parameter (-DeviceAuthentication is gone),
+        and the device-code UX adds a step the team didn't want anyway.
+        Interactive auth opens the system default browser on the VM; the
+        investigator signs in normally (username, password, 2FA).
         """
         if self._auth_complete:
             return ("succeeded", "already authenticated")
@@ -370,22 +375,22 @@ class EngagementProcess:
 
         scopes_pwsh = ",".join(f"'{s}'" for s in graph_scopes)
         self._auth_target = "graph"
-        await self._emit_state({"type": "auth_step", "step": "graph_starting"})
+        await self._emit_state({"type": "auth_step", "step": "importing_modules"})
 
-        # *>&1 routes Information / Warning / Verbose streams into the
-        # Success (stdout) stream. Without this, Connect-ExchangeOnline's
-        # device-code prompt -- which is written via Write-Host -- never
-        # reaches our subprocess pipe in PS 7.
+        # *>&1 routes Information/Warning/Verbose streams into Success so all
+        # Connect output (including any prompts from older module versions)
+        # reaches our subprocess pipe.
         invocation = (
             "Import-Module Microsoft.Graph -ErrorAction Stop *>&1; "
             "Import-Module ExchangeOnlineManagement -ErrorAction Stop *>&1; "
             "Import-Module HAWK -ErrorAction Stop *>&1; "
-            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh} *>&1; "
+            "Write-Output '__HAWK_AUTH_MODULES_LOADED__'; "
+            f"Connect-MgGraph -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
-            "Connect-ExchangeOnline -DeviceAuthentication -ShowBanner:$false *>&1; "
+            "Connect-ExchangeOnline -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
-        clean = "Connect-MgGraph (DeviceCode) ; Connect-ExchangeOnline (DeviceAuthentication)"
+        clean = "Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
         script = make_run_script(invocation)
 
         run_id = await self.register_run(
@@ -540,7 +545,7 @@ def _is_wrapper_noise(text: str) -> bool:
     s_strip = s.rstrip()
     if s_strip == SENTINEL_OK or s_strip.startswith(SENTINEL_FAIL_PREFIX):
         return True
-    if s_strip in (AUTH_MARKER_GRAPH_OK, AUTH_MARKER_EXO_OK):
+    if s_strip in (AUTH_MARKER_GRAPH_OK, AUTH_MARKER_EXO_OK, "__HAWK_AUTH_MODULES_LOADED__"):
         return True
     return False
 

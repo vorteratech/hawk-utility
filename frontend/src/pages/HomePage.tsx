@@ -166,13 +166,23 @@ function EngagementListCard({ activeId }: { activeId: number | null }) {
 }
 
 function EngagementRow({ eng, isActive }: { eng: Engagement; isActive: boolean }) {
+  const qc = useQueryClient()
+  const del = useMutation({
+    mutationFn: () => api.deleteEngagement(eng.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['engagements'] }),
+  })
+  const canDelete = !isActive && eng.status !== 'starting' && eng.status !== 'active'
+  const onDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!confirm(`Delete engagement #${eng.id} "${eng.client_name}"? The output folder on disk is preserved.`)) return
+    del.mutate()
+  }
+
   return (
     <li className="py-3">
-      <Link
-        to={`/engagements/${eng.id}`}
-        className="flex items-center justify-between gap-3 hover:bg-[var(--color-surface-2)] -mx-2 px-2 py-1 rounded"
-      >
-        <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3 hover:bg-[var(--color-surface-2)] -mx-2 px-2 py-1 rounded">
+        <Link to={`/engagements/${eng.id}`} className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate">{eng.client_name}</span>
             <StatusBadge status={eng.status} />
@@ -181,9 +191,22 @@ function EngagementRow({ eng, isActive }: { eng: Engagement; isActive: boolean }
           <div className="text-xs text-[var(--color-muted)] mt-0.5">
             {eng.start_date} → {eng.end_date} · created {new Date(eng.created_at).toLocaleString()}
           </div>
+        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-[var(--color-muted)]">#{eng.id}</span>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={del.isPending}
+              title="Delete engagement record (output folder kept)"
+              className="text-xs px-2 py-1 rounded border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-danger)] hover:border-[var(--color-danger)] disabled:opacity-50"
+            >
+              {del.isPending ? '…' : 'Delete'}
+            </button>
+          )}
         </div>
-        <span className="text-xs text-[var(--color-muted)] shrink-0">#{eng.id}</span>
-      </Link>
+      </div>
     </li>
   )
 }

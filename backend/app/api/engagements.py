@@ -145,6 +145,43 @@ def get_engagement(engagement_id: int) -> dict:
     }
 
 
+@router.delete("/{engagement_id}")
+def delete_engagement(engagement_id: int, delete_folder: bool = False) -> dict:
+    """Remove an engagement record. Refuses if the engagement is still
+    active in memory -- end it first. The output folder is preserved by
+    default since it's the unit of forensic handoff (plan §6.3); pass
+    ?delete_folder=true to remove it too."""
+    eng = current()
+    if eng is not None and eng.engagement_id == engagement_id:
+        raise HTTPException(409, "engagement is active; end it before deleting")
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT status, output_folder FROM engagements WHERE id = ?",
+            (engagement_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "engagement not found")
+        if row["status"] in ("starting", "active"):
+            raise HTTPException(
+                409,
+                "engagement is marked active in DB; end it (or wait for the zombie sweep) before deleting",
+            )
+        conn.execute("DELETE FROM runs WHERE engagement_id = ?", (engagement_id,))
+        conn.execute("DELETE FROM engagements WHERE id = ?", (engagement_id,))
+
+    folder_removed = False
+    if delete_folder and row["output_folder"]:
+        folder = Path(row["output_folder"])
+        if folder.exists():
+            import shutil
+
+            shutil.rmtree(folder, ignore_errors=True)
+            folder_removed = True
+
+    return {"ok": True, "folder_removed": folder_removed}
+
+
 @router.post("/{engagement_id}/end")
 async def end_engagement(engagement_id: int) -> dict:
     eng = current()
