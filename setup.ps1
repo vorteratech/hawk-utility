@@ -1,4 +1,4 @@
-# setup.ps1 --one-time setup for hawk-wrapper on a fresh Windows VM.
+# setup.ps1 --one-time setup for hawk-utility on a fresh Windows VM.
 # Idempotent: re-running it is safe and skips anything already installed.
 #
 # Usage (in PowerShell 7 from the repo root):

@@ -1,7 +1,7 @@
 [project]
-name = "hawk-wrapper-backend"
+name = "hawk-utility-backend"
 version = "1.0.0"
-description = "Vortera HAWK Investigation Utility -- backend"
+description = "Vendetta HAWK Investigation Utility -- backend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

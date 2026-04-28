@@ -1,4 +1,4 @@
-# start.ps1 -- spins up the hawk-wrapper backend + frontend in two windows
+# start.ps1 -- spins up the hawk-utility backend + frontend in two windows
 # and opens the browser. Daily-use script.
 #
 # Usage (from the repo root):

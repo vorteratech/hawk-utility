@@ -65,4 +65,4 @@ app.include_router(ws.router)
 
 @app.get("/")
 def root() -> dict:
-    return {"name": "hawk-wrapper", "version": "0.1.0"}
+    return {"name": "hawk-utility", "version": "1.0.0"}

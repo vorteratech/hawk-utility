@@ -31,10 +31,10 @@ It addresses three pain points the team had with bare HAWK:
 | Streaming| WebSocket for live console output and run state changes |
 | CSV view | AG Grid Community |
 
-Plan/spec lives in [`hawk-wrapper-plan.md`](hawk-wrapper-plan.md) (engagement
-model, sentinel-wrapped run lifecycle, failure modes, etc.). The wrapper holds
-**one `pwsh` subprocess per engagement** and never reuses it — process isolation
-is the only reliable way to keep tenant connections from cross-contaminating.
+The utility holds **one `pwsh` subprocess per engagement** and never reuses it
+— process isolation is the only reliable way to keep tenant connections from
+cross-contaminating. Engagement, run, and failure-mode behavior are defined in
+the project's design doc (kept outside the repo).
 
 ## Requirements
 
@@ -81,8 +81,8 @@ It'll prompt — answer **Y**.
 
 ```powershell
 cd $env:USERPROFILE
-git clone https://github.com/vorteratech/hawk-wrapper.git
-cd hawk-wrapper
+git clone https://github.com/vorteratech/hawk-utility.git
+cd hawk-utility
 ```
 
 ### 4. Run `setup.ps1`
@@ -145,9 +145,8 @@ To stop, close either window or `Ctrl+C` inside it.
 ## Project layout
 
 ```
-hawk-wrapper/
+hawk-utility/
 ├── README.md                  # this file
-├── hawk-wrapper-plan.md       # design doc, behavior contracts, failure modes
 ├── setup.ps1                  # one-time install for a fresh Windows VM
 ├── start.ps1                  # daily dev loop (backend + frontend + browser)
 ├── backend/
