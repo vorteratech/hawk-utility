@@ -372,13 +372,17 @@ class EngagementProcess:
         self._auth_target = "graph"
         await self._emit_state({"type": "auth_step", "step": "graph_starting"})
 
+        # *>&1 routes Information / Warning / Verbose streams into the
+        # Success (stdout) stream. Without this, Connect-ExchangeOnline's
+        # device-code prompt -- which is written via Write-Host -- never
+        # reaches our subprocess pipe in PS 7.
         invocation = (
-            "Import-Module Microsoft.Graph -ErrorAction Stop; "
-            "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
-            "Import-Module HAWK -ErrorAction Stop; "
-            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh}; "
+            "Import-Module Microsoft.Graph -ErrorAction Stop *>&1; "
+            "Import-Module ExchangeOnlineManagement -ErrorAction Stop *>&1; "
+            "Import-Module HAWK -ErrorAction Stop *>&1; "
+            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
-            "Connect-ExchangeOnline -DeviceAuthentication -ShowBanner:$false; "
+            "Connect-ExchangeOnline -DeviceAuthentication -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
         clean = "Connect-MgGraph (DeviceCode) ; Connect-ExchangeOnline (DeviceAuthentication)"
