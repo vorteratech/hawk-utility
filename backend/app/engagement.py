@@ -570,12 +570,14 @@ async def clear_current(eng: EngagementProcess) -> None:
 
 def _is_wrapper_noise(text: str) -> bool:
     """Lines we don't want investigators to see: the base64 Invoke-Expression
-    echo, pwsh REPL prompts, and the wrapper's internal sentinel/auth
-    markers."""
+    echo, pwsh REPL prompts, the wrapper's internal sentinel/auth markers,
+    and our own startup setup commands echoed back by the REPL."""
     s = text.lstrip()
     if "Invoke-Expression" in s and "FromBase64String" in s:
         return True
     if s.startswith("PS ") and s.rstrip().endswith(">"):
+        return True
+    if "[Console]::OutputEncoding" in s and "UTF8" in s:
         return True
     s_strip = s.rstrip()
     if s_strip == SENTINEL_OK or s_strip.startswith(SENTINEL_FAIL_PREFIX):

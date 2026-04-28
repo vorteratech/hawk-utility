@@ -322,6 +322,7 @@ function CmdletPickerCard({
   disabledReason?: string
 }) {
   const qc = useQueryClient()
+  const [userModalOpen, setUserModalOpen] = useState(false)
   const run = useMutation({
     mutationFn: (body: { cmdlet: string; params: Record<string, unknown> }) =>
       api.createRun(engagementId, body),
@@ -337,6 +338,19 @@ function CmdletPickerCard({
         FilePath: outputFolder,
       },
     })
+
+  const runUsers = (upns: string[]) => {
+    run.mutate({
+      cmdlet: 'Start-HawkUserInvestigation',
+      params: {
+        UserPrincipalName: upns,
+        StartDate: startDate,
+        EndDate: endDate,
+        FilePath: outputFolder,
+      },
+    })
+    setUserModalOpen(false)
+  }
 
   return (
     <Card
@@ -357,12 +371,14 @@ function CmdletPickerCard({
         >
           {run.isPending ? 'Starting…' : 'Run Tenant Investigation'}
         </Button>
-        <p className="text-[11px] text-[var(--color-muted)] leading-snug">
-          Runs Start-HawkTenantInvestigation -StartDate {startDate} -EndDate{' '}
-          {endDate} -FilePath &lt;engagement folder&gt;. HAWK 4.0's
-          non-interactive mode kicks in automatically when these are passed.
-          User Investigation lands in M6.
-        </p>
+        <Button
+          onClick={() => setUserModalOpen(true)}
+          disabled={disabled || run.isPending}
+          className="w-full"
+          title="Runs Start-HawkUserInvestigation against one or more UPNs"
+        >
+          Run User Investigation…
+        </Button>
         <details className="text-xs text-[var(--color-muted)]">
           <summary className="cursor-pointer select-none hover:text-[var(--color-text)]">
             Smoke tests
@@ -391,8 +407,108 @@ function CmdletPickerCard({
         </details>
         {run.error && <Err msg={String(run.error)} />}
       </div>
+      <UserInvestigationModal
+        open={userModalOpen}
+        onClose={() => setUserModalOpen(false)}
+        onSubmit={runUsers}
+        startDate={startDate}
+        endDate={endDate}
+      />
     </Card>
   )
+}
+
+function UserInvestigationModal({
+  open,
+  onClose,
+  onSubmit,
+  startDate,
+  endDate,
+}: {
+  open: boolean
+  onClose: () => void
+  onSubmit: (upns: string[]) => void
+  startDate: string
+  endDate: string
+}) {
+  const [raw, setRaw] = useState('')
+  const upns = parseUpns(raw)
+  const valid = upns.length > 0 && upns.every(isProbablyUpn)
+
+  return (
+    <Modal open={open} onClose={onClose} title="Run User Investigation">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!valid) return
+          onSubmit(upns)
+          setRaw('')
+        }}
+        className="space-y-4"
+      >
+        <p className="text-sm text-[var(--color-muted)]">
+          Runs <code className="font-mono text-xs">Start-HawkUserInvestigation</code>{' '}
+          against the listed UPNs. Date range and output folder come from
+          the engagement.
+        </p>
+        <label className="block">
+          <div className="text-xs text-[var(--color-muted)] mb-1">
+            User principal names — one per line, or comma-separated
+          </div>
+          <textarea
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            rows={6}
+            className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--color-accent)]"
+            placeholder={'alice@contoso.com\nbob@contoso.com'}
+          />
+        </label>
+        <div className="text-xs text-[var(--color-muted)]">
+          {upns.length === 0 && 'Enter at least one UPN.'}
+          {upns.length > 0 && (
+            <>
+              <span className="text-[var(--color-text)]">{upns.length} UPN{upns.length === 1 ? '' : 's'}:</span>{' '}
+              {upns.slice(0, 5).map((u) => (
+                <span
+                  key={u}
+                  className={`inline-block font-mono mr-2 ${
+                    isProbablyUpn(u) ? '' : 'text-[var(--color-danger)]'
+                  }`}
+                >
+                  {u}
+                </span>
+              ))}
+              {upns.length > 5 && <span>and {upns.length - 5} more</span>}
+            </>
+          )}
+        </div>
+        <p className="text-[11px] text-[var(--color-muted)]">
+          Date window: {startDate} → {endDate}.
+        </p>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" disabled={!valid}>
+            Run
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function parseUpns(raw: string): string[] {
+  return raw
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+}
+
+function isProbablyUpn(s: string): boolean {
+  // Loose check -- HAWK validates the real format. We just need to catch
+  // obvious typos before we POST to the backend.
+  return /^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$/.test(s)
 }
 
 function RunsCard({ runs }: { runs: Run[] }) {
