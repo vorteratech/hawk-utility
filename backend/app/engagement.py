@@ -377,21 +377,25 @@ class EngagementProcess:
         self._auth_target = "graph"
         await self._emit_state({"type": "auth_step", "step": "importing_modules"})
 
-        # No explicit Import-Module up front. PowerShell auto-loads
-        # Microsoft.Graph.Authentication on the first Connect-MgGraph call,
-        # ExchangeOnlineManagement on the first Connect-ExchangeOnline call.
-        # Importing the Microsoft.Graph meta-module pulls 30+ submodules
-        # (60-90s on a fresh VM) and is unnecessary for the connect itself.
+        # Import HAWK FIRST so its required Microsoft.Graph submodule
+        # versions get loaded into the process before Connect-MgGraph runs.
+        # If we connect first, Connect-MgGraph auto-loads whatever version of
+        # Microsoft.Graph.Authentication is highest-installed; later
+        # HAWK auto-load demands its specific version and PowerShell can't
+        # have two versions of the same assembly loaded -- which is exactly
+        # the 'Assembly with same name is already loaded' error we hit on
+        # the test VM. Loading HAWK first pins the right chain.
         # *>&1 folds Information/Warning/Verbose into Success so any prompts
         # or progress text hit our pipe.
         invocation = (
+            "Import-Module HAWK -ErrorAction Stop *>&1; "
             "Write-Output '__HAWK_AUTH_MODULES_LOADED__'; "
             f"Connect-MgGraph -NoWelcome -Scopes {scopes_pwsh} *>&1; "
             f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
             "Connect-ExchangeOnline -ShowBanner:$false *>&1; "
             f"Write-Output '{AUTH_MARKER_EXO_OK}'"
         )
-        clean = "Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
+        clean = "Import-Module HAWK ; Connect-MgGraph ; Connect-ExchangeOnline (interactive browser sign-in)"
         script = make_run_script(invocation)
 
         run_id = await self.register_run(
