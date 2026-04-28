@@ -194,10 +194,37 @@ try {
     Pop-Location
 }
 
+# --- 5. Desktop shortcut -------------------------------------------------
+Write-Step "Creating 'Start HAWK' desktop shortcut"
+$desktop = [Environment]::GetFolderPath('Desktop')
+$shortcutPath = Join-Path $desktop 'Start HAWK.lnk'
+$startScript = Join-Path $RepoRoot 'start.ps1'
+
+$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+if (-not $pwshCmd) {
+    Write-Host "  pwsh not found on PATH; skipping shortcut. Re-run setup.ps1 after PowerShell 7 install completes." -ForegroundColor Yellow
+} else {
+    try {
+        $WshShell = New-Object -ComObject WScript.Shell
+        $sc = $WshShell.CreateShortcut($shortcutPath)
+        $sc.TargetPath = $pwshCmd.Source
+        $sc.Arguments = "-ExecutionPolicy Bypass -File `"$startScript`""
+        $sc.WorkingDirectory = $RepoRoot
+        # Minimized so the launcher's brief existence doesn't grab focus;
+        # start.ps1 spawns its own visible windows for the backend + frontend.
+        $sc.WindowStyle = 7
+        $sc.Description = 'Launch the HAWK Investigation Utility (backend + frontend + browser)'
+        $sc.Save()
+        Write-Host "  Created: $shortcutPath" -ForegroundColor Green
+    } catch {
+        Write-Host "  Failed to create shortcut: $_" -ForegroundColor Yellow
+    }
+}
+
 # --- Done ----------------------------------------------------------------
-Write-Step "Bootstrap complete"
+Write-Step "Setup complete"
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor White
-Write-Host "  1. (One-time)  gh auth login    # so future git operations are seamless" -ForegroundColor Gray
-Write-Host "  2. Run         .\start.ps1       # spins up backend + frontend and opens the browser" -ForegroundColor Gray
+Write-Host "  - Double-click 'Start HAWK' on your desktop, or run .\start.ps1 from this folder." -ForegroundColor Gray
+Write-Host "  - (Optional, one-time) gh auth login -- enables seamless future git pushes." -ForegroundColor Gray
 Write-Host ""

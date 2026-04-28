@@ -105,13 +105,18 @@ path the wrapper backend actually queries. You don't need to do anything special
 
 ## Daily use
 
+`setup.ps1` creates a **Start HAWK** shortcut on the user's desktop. Double-click
+it and the wrapper launches.
+
+If you'd rather run from a terminal:
+
 ```powershell
 .\start.ps1
 ```
 
-Spins up two PowerShell windows — one running `uvicorn` for the FastAPI backend
-on `127.0.0.1:8000`, one running `vite` for the frontend on `127.0.0.1:5173` —
-and opens the browser to `http://localhost:5173`.
+Either way spins up two PowerShell windows — one running `uvicorn` for the
+FastAPI backend on `127.0.0.1:8000`, one running `vite` for the frontend on
+`127.0.0.1:5173` — and opens the browser to `http://localhost:5173`.
 
 Both windows auto-run their dep manager (`pip install -e .` and `npm install`)
 on every launch so a `git pull` that adds a new package doesn't leave you with
