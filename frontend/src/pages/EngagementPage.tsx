@@ -453,6 +453,12 @@ function CmdletPickerCard({
         StartDate: startDate,
         EndDate: endDate,
         FilePath: outputFolder,
+        // Skip HAWK's "Checking for latest version online" phone-home; the
+        // version check can hang for minutes on VMs where PSGallery is in
+        // a partially-broken state. setup.ps1 is the single source of truth
+        // for which HAWK version is installed -- we don't want HAWK
+        // updating itself mid-investigation anyway.
+        SkipUpdate: true,
       },
     })
 
@@ -464,6 +470,7 @@ function CmdletPickerCard({
         StartDate: startDate,
         EndDate: endDate,
         FilePath: outputFolder,
+        SkipUpdate: true,
       },
     })
     setUserModalOpen(false)
