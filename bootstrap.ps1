@@ -99,13 +99,13 @@ if ((Get-PSRepository PSGallery -ErrorAction SilentlyContinue).InstallationPolic
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 }
 
-# HAWK 4.0 is binary-compiled against Microsoft.Graph.Authentication 2.36.1
-# (strong-named .NET reference). Earlier pins to 2.25.0 caused 'Assembly
-# with same name is already loaded' at HAWK auto-load time on the test VM.
-# 2.36.1 has a known TypeLoadException on UserProvidedTokenCredential
-# (used only in -AccessToken auth, which we don't use), so the device-code
-# flow we run is fine on 2.36.1.
-$GraphPinnedVersion = '2.36.1'
+# Microsoft.Graph 2.36.1 ships a broken Authentication.Core (TypeLoadException
+# on UserProvidedTokenCredential.GetTokenAsync) that crashes Import-Module
+# HAWK at module load time. 2.25.0 is the last widely-deployed stable build
+# that works with HAWK 4.0 -- HAWK's loose RequiredModules constraint
+# (>= 2.0.0) means it accepts 2.25.0. Pin to 2.25.0 and aggressively
+# uninstall any other version present.
+$GraphPinnedVersion = '2.25.0'
 
 # CurrentUser scope sidesteps the AllUsers PackageManagement lock issues
 # that hit shared machines where modules are open in another process.
@@ -117,22 +117,42 @@ if ($existingHawk) {
     Install-Module -Name HAWK -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
 }
 
+# Always remove non-pinned Graph versions, even if the pinned one is
+# already installed. Mixed versions cause assembly load conflicts at
+# Import-Module HAWK time (2.36.1 in particular has a broken
+# Authentication.Core).
+$stale = Get-Module -ListAvailable -Name 'Microsoft.Graph*' |
+         Where-Object Version -ne ([version]$GraphPinnedVersion)
+if ($stale) {
+    Write-Host "  - Removing $($stale.Count) stale Microsoft.Graph* version(s) to avoid assembly conflicts..." -ForegroundColor Yellow
+    $stale | Group-Object Name | ForEach-Object {
+        $modName = $_.Name
+        $_.Group | ForEach-Object {
+            Uninstall-Module -Name $modName -RequiredVersion $_.Version -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # Belt-and-braces: nuke leftover folders Uninstall-Module sometimes misses.
+    @(
+        "$env:USERPROFILE\Documents\PowerShell\Modules",
+        "$env:USERPROFILE\Documents\WindowsPowerShell\Modules",
+        "C:\Program Files\PowerShell\Modules",
+        "C:\Program Files\WindowsPowerShell\Modules"
+    ) | ForEach-Object {
+        Get-ChildItem $_ -Filter 'Microsoft.Graph*' -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $modDir = $_
+            Get-ChildItem $modDir.FullName -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -ne $GraphPinnedVersion } |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $existingGraph = Get-Module -ListAvailable -Name Microsoft.Graph |
                  Where-Object Version -eq ([version]$GraphPinnedVersion) |
                  Select-Object -First 1
 if ($existingGraph) {
     Write-Host "  - Microsoft.Graph $GraphPinnedVersion already installed" -ForegroundColor DarkGray
 } else {
-    # Remove any other Graph version first; mixing causes assembly load
-    # errors when HAWK tries to Import-Module Microsoft.Graph.Authentication.
-    $stale = Get-Module -ListAvailable -Name 'Microsoft.Graph*' |
-             Where-Object Version -ne ([version]$GraphPinnedVersion)
-    if ($stale) {
-        Write-Host "  - Removing stale Microsoft.Graph* versions to avoid assembly conflicts..." -ForegroundColor Yellow
-        $stale | Group-Object Name | ForEach-Object {
-            Uninstall-Module -Name $_.Name -AllVersions -Force -ErrorAction SilentlyContinue
-        }
-    }
     Write-Host "  - Microsoft.Graph $GraphPinnedVersion installing (this is the slow one)..." -ForegroundColor Yellow
     Install-Module -Name Microsoft.Graph -RequiredVersion $GraphPinnedVersion -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber
 }

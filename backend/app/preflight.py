@@ -149,13 +149,14 @@ def check_exo() -> CheckResult:
 
 def check_graph() -> CheckResult:
     # Microsoft.Graph is a meta-module; presence of any version is sufficient.
-    # We recommend 2.36.1 because that's what HAWK 4.0 is binary-pinned to.
+    # We pin to 2.25.0 -- 2.36.1 has a broken Authentication.Core that crashes
+    # Import-Module HAWK with TypeLoadException.
     return _check_module(
         "graph",
         "Microsoft.Graph",
         "Microsoft.Graph",
         MIN_GRAPH,
-        "Install-Module -Name Microsoft.Graph -RequiredVersion 2.36.1 -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
+        "Install-Module -Name Microsoft.Graph -RequiredVersion 2.25.0 -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
     )
 
 
