@@ -41,7 +41,13 @@ def _parse_version(s: str) -> tuple[int, ...] | None:
 
 
 def _cmp_version(actual: tuple[int, ...], minimum: tuple[int, ...]) -> bool:
-    return actual >= minimum
+    # Pad to equal length so (4, 0) compares >= (4, 0, 0). PowerShell modules
+    # often report two-segment versions ("4.0") while we declare a three-
+    # segment minimum.
+    n = max(len(actual), len(minimum))
+    a = actual + (0,) * (n - len(actual))
+    m = minimum + (0,) * (n - len(minimum))
+    return a >= m
 
 
 def _run_pwsh(command: str, timeout: float = 10.0) -> tuple[int, str, str]:
@@ -127,7 +133,7 @@ def check_hawk() -> CheckResult:
         "HAWK",
         "HAWK module 4.0+",
         MIN_HAWK,
-        "Install-Module -Name HAWK -Force -Scope AllUsers",
+        "Install-Module -Name HAWK -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
     )
 
 
@@ -137,18 +143,19 @@ def check_exo() -> CheckResult:
         "ExchangeOnlineManagement",
         "ExchangeOnlineManagement 2.0.4+",
         MIN_EXO,
-        "Install-Module -Name ExchangeOnlineManagement -Force -Scope AllUsers",
+        "Install-Module -Name ExchangeOnlineManagement -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
     )
 
 
 def check_graph() -> CheckResult:
     # Microsoft.Graph is a meta-module; presence of any version is sufficient.
+    # Pin to 2.25.0 to dodge the Authentication.Core TypeLoadException in 2.36.1.
     return _check_module(
         "graph",
         "Microsoft.Graph",
         "Microsoft.Graph",
         MIN_GRAPH,
-        "Install-Module -Name Microsoft.Graph -Force -Scope AllUsers",
+        "Install-Module -Name Microsoft.Graph -RequiredVersion 2.25.0 -Force -SkipPublisherCheck -Scope CurrentUser -AllowClobber",
     )
 
 
