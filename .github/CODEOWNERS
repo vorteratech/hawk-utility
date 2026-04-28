@@ -1,0 +1,6 @@
+# Default reviewer for every PR -- @vorteratech is auto-requested.
+# If collaborators get added later, add per-path overrides here, e.g.:
+#   /backend/    @some-backend-reviewer
+#   /frontend/   @some-frontend-reviewer
+
+*   @vorteratech
