@@ -60,6 +60,8 @@ async def create_run(engagement_id: int, body: RunBody) -> dict:
     eng = current()
     if eng is None or eng.engagement_id != engagement_id:
         raise HTTPException(404, "no active engagement with that id")
+    if not eng._auth_complete:
+        raise HTTPException(409, "engagement is still authenticating; wait for the device-code flow to finish")
 
     args = _params_to_pwsh_args(body.params)
     invocation = f"{body.cmdlet} {args}".strip()

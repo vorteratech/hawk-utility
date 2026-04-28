@@ -38,6 +38,7 @@ class CreateEngagementBody(BaseModel):
     end_date: str = Field(description="ISO date YYYY-MM-DD")
     tenant_hint: Optional[str] = None
     skip_preflight: bool = Field(default=False, description="Dev escape hatch only")
+    skip_auth: bool = Field(default=False, description="Dev escape hatch -- do not run Connect-MgGraph / Connect-ExchangeOnline")
 
 
 @router.get("")
@@ -102,6 +103,17 @@ async def create_engagement(body: CreateEngagementBody) -> dict:
             )
         raise
 
+    if body.skip_auth:
+        # Dev path -- mark as authenticated immediately so the cmdlet picker
+        # is enabled. HAWK calls will fail loudly if the user actually tries
+        # them without real auth.
+        eng._auth_complete = True
+    else:
+        # Fire-and-forget. Device-code prompts and completion fire as state
+        # events on /ws/engagements/{id}/state; the frontend renders the
+        # device-code modal and gates the cmdlet picker on auth_complete.
+        asyncio.create_task(eng.connect())
+
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM engagements WHERE id = ?", (engagement_id,)
@@ -120,9 +132,16 @@ def get_engagement(engagement_id: int) -> dict:
         runs = conn.execute(
             "SELECT * FROM runs WHERE engagement_id = ? ORDER BY id DESC", (engagement_id,)
         ).fetchall()
+    eng = current()
+    auth_complete = (
+        eng is not None
+        and eng.engagement_id == engagement_id
+        and eng._auth_complete
+    )
     return {
         "engagement": _row_to_dict(row),
         "runs": [_row_to_dict(r) for r in runs],
+        "auth_complete": auth_complete,
     }
 
 

@@ -62,6 +62,9 @@ export type StateEvent =
   | { type: 'engagement_ended'; engagement_id: number; ts: string }
   | { type: 'run_started'; run_id: number; cmdlet: string; clean_invocation: string; ts: string }
   | { type: 'run_finished'; run_id: number; status: Run['status']; detail: string; ts: string }
+  | { type: 'device_code'; url: string; code: string; target: 'graph' | 'exo' | null; ts: string }
+  | { type: 'auth_step'; step: 'graph_starting' | 'graph_done' | 'exo_done'; ts: string }
+  | { type: 'auth_complete'; ts: string }
   | { type: 'error'; msg: string }
 
 async function jsonFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,13 +90,14 @@ export const api = {
   activeEngagement: () =>
     jsonFetch<{ engagement: Engagement | null }>('/api/engagements/active'),
   getEngagement: (id: number) =>
-    jsonFetch<{ engagement: Engagement; runs: Run[] }>(`/api/engagements/${id}`),
+    jsonFetch<{ engagement: Engagement; runs: Run[]; auth_complete: boolean }>(`/api/engagements/${id}`),
   createEngagement: (body: {
     client_name: string
     start_date: string
     end_date: string
     tenant_hint?: string
     skip_preflight?: boolean
+    skip_auth?: boolean
   }) =>
     jsonFetch<{ engagement: Engagement }>('/api/engagements', {
       method: 'POST',

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import sqlite3
 import sys
 from collections import deque
@@ -20,6 +21,21 @@ from app.db import get_conn
 # cmdlet invocation and listens for these tokens to mark run success/failure.
 SENTINEL_OK = "__HAWK_WRAPPER_OK__"
 SENTINEL_FAIL_PREFIX = "__HAWK_WRAPPER_FAIL__"
+
+# Markers used inside the auth orchestration script to tell us which connect
+# step we just finished, so the device-code modal can label the next prompt
+# correctly (plan §5.1 step 6: "Expect TWO device-code prompts").
+AUTH_MARKER_GRAPH_OK = "__HAWK_AUTH_GRAPH_OK__"
+AUTH_MARKER_EXO_OK = "__HAWK_AUTH_EXO_OK__"
+
+# Microsoft.Graph and ExchangeOnlineManagement both print the device-code
+# prompt as a single line: "To sign in, use a web browser to open the page
+# <URL> and enter the code <CODE> to authenticate." We pull URL + code out
+# with one regex.
+DEVICE_CODE_RE = re.compile(
+    r"open the page (?P<url>https?://\S+) and enter the code (?P<code>\S+)",
+    re.IGNORECASE,
+)
 
 # Last N lines kept in memory for late WebSocket joiners (plan §5.2 step 6).
 RING_BUFFER_SIZE = 1000
@@ -71,6 +87,11 @@ class EngagementProcess:
         # consumer (start_run) is single-shot.
         self._sentinel_event: Optional[asyncio.Event] = None
         self._sentinel_outcome: Optional[tuple[str, str]] = None  # (status, detail)
+
+        # Auth state. _auth_target is the connect we're currently driving so
+        # device-code prompts can be labeled 'graph' vs 'exo' for the modal.
+        self._auth_target: Optional[str] = None
+        self._auth_complete: bool = False
 
         self._lock = asyncio.Lock()
         self._terminated = False
@@ -213,6 +234,8 @@ class EngagementProcess:
             except Exception:  # noqa: BLE001
                 text = repr(raw)
             self._check_sentinel(text)
+            await self._check_auth_markers(text)
+            await self._check_device_code(text)
             if _is_wrapper_noise(text):
                 # Still write to the run log file for forensic completeness;
                 # don't fan out to console subscribers.
@@ -235,6 +258,30 @@ class EngagementProcess:
             self._sentinel_outcome = ("failed", detail)
             self._sentinel_event.set()
             return
+
+    async def _check_auth_markers(self, text: str) -> None:
+        """Track which connect step finished so device-code events can be
+        labeled correctly for the modal."""
+        s = text.strip()
+        if s == AUTH_MARKER_GRAPH_OK:
+            self._auth_target = "exo"
+            await self._emit_state({"type": "auth_step", "step": "graph_done"})
+        elif s == AUTH_MARKER_EXO_OK:
+            self._auth_target = None
+            await self._emit_state({"type": "auth_step", "step": "exo_done"})
+
+    async def _check_device_code(self, text: str) -> None:
+        m = DEVICE_CODE_RE.search(text)
+        if not m:
+            return
+        await self._emit_state(
+            {
+                "type": "device_code",
+                "url": m.group("url"),
+                "code": m.group("code"),
+                "target": self._auth_target,
+            }
+        )
 
     # ------------------------------------------------------------------
     # stdin
@@ -302,6 +349,53 @@ class EngagementProcess:
             # line above is what the investigator wants to see.
             await self.send_stdin(invocation_script, echo=False)
             return run_id
+
+    async def connect(
+        self,
+        graph_scopes: Optional[list[str]] = None,
+    ) -> tuple[str, str]:
+        """Run the Graph + EXO connect sequence inside this engagement.
+
+        Plan §5.1: Graph FIRST (avoids the MSAL/WAM conflict), then EXO.
+        We watch stdout for device-code prompts and emit state events; the
+        UI surfaces them in a modal. Returns (status, detail) when done.
+        """
+        if self._auth_complete:
+            return ("succeeded", "already authenticated")
+        if graph_scopes is None:
+            # Conservative starting set per plan §11. Real-world tenant tests
+            # may surface that we need more (User.Read.All, etc.) -- expand
+            # here when that lands.
+            graph_scopes = ["AuditLog.Read.All", "Directory.Read.All"]
+
+        scopes_pwsh = ",".join(f"'{s}'" for s in graph_scopes)
+        self._auth_target = "graph"
+        await self._emit_state({"type": "auth_step", "step": "graph_starting"})
+
+        invocation = (
+            "Import-Module Microsoft.Graph -ErrorAction Stop; "
+            "Import-Module ExchangeOnlineManagement -ErrorAction Stop; "
+            "Import-Module HAWK -ErrorAction Stop; "
+            f"Connect-MgGraph -UseDeviceCode -NoWelcome -Scopes {scopes_pwsh}; "
+            f"Write-Output '{AUTH_MARKER_GRAPH_OK}'; "
+            "Connect-ExchangeOnline -DeviceAuthentication -ShowBanner:$false; "
+            f"Write-Output '{AUTH_MARKER_EXO_OK}'"
+        )
+        clean = "Connect-MgGraph (DeviceCode) ; Connect-ExchangeOnline (DeviceAuthentication)"
+        script = make_run_script(invocation)
+
+        run_id = await self.register_run(
+            cmdlet="Connect",
+            params={"graph_scopes": graph_scopes},
+            invocation_script=script,
+            clean_invocation=clean,
+        )
+        status, detail = await self.await_run(run_id)
+        self._auth_target = None
+        if status == "succeeded":
+            self._auth_complete = True
+            await self._emit_state({"type": "auth_complete"})
+        return status, detail
 
     async def await_run(self, run_id: int) -> tuple[str, str]:
         """Block until the in-flight run hits its sentinel; finalize and emit."""
@@ -432,7 +526,8 @@ async def clear_current(eng: EngagementProcess) -> None:
 
 def _is_wrapper_noise(text: str) -> bool:
     """Lines we don't want investigators to see: the base64 Invoke-Expression
-    echo, pwsh REPL prompts, and the wrapper's internal sentinel markers."""
+    echo, pwsh REPL prompts, and the wrapper's internal sentinel/auth
+    markers."""
     s = text.lstrip()
     if "Invoke-Expression" in s and "FromBase64String" in s:
         return True
@@ -440,6 +535,8 @@ def _is_wrapper_noise(text: str) -> bool:
         return True
     s_strip = s.rstrip()
     if s_strip == SENTINEL_OK or s_strip.startswith(SENTINEL_FAIL_PREFIX):
+        return True
+    if s_strip in (AUTH_MARKER_GRAPH_OK, AUTH_MARKER_EXO_OK):
         return True
     return False
 

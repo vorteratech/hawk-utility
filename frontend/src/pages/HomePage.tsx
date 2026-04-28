@@ -24,6 +24,7 @@ function NewEngagementModal({
   const [startDate, setStartDate] = useState(thirtyAgo)
   const [endDate, setEndDate] = useState(today)
   const [skipPreflight, setSkipPreflight] = useState(false)
+  const [skipAuth, setSkipAuth] = useState(false)
 
   const create = useMutation({
     mutationFn: api.createEngagement,
@@ -43,6 +44,7 @@ function NewEngagementModal({
       end_date: endDate,
       tenant_hint: tenantHint.trim() || undefined,
       skip_preflight: skipPreflight,
+      skip_auth: skipAuth,
     })
   }
 
@@ -93,9 +95,17 @@ function NewEngagementModal({
               checked={skipPreflight}
               onChange={(e) => setSkipPreflight(e.target.checked)}
             />
-            Skip pre-flight (dev only — pwsh subprocess will still spawn but HAWK cmdlets will fail)
+            Skip pre-flight (dev only -- pwsh subprocess will still spawn but HAWK cmdlets will fail)
           </label>
         )}
+        <label className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
+          <input
+            type="checkbox"
+            checked={skipAuth}
+            onChange={(e) => setSkipAuth(e.target.checked)}
+          />
+          Skip Connect-MgGraph + Connect-ExchangeOnline (dev only -- skips device-code flow)
+        </label>
         {create.error && <Err msg={String(create.error)} />}
         <div className="flex justify-end gap-2 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>

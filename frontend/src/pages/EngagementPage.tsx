@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type ConsoleLine, type Run } from '../lib/api'
+import { api, type ConsoleLine, type Run, type StateEvent } from '../lib/api'
 import { useConsoleStream, useStateStream } from '../lib/ws'
-import { Button, Card, Err, StatusBadge } from '../components/ui'
+import { Button, Card, Err, Modal, StatusBadge } from '../components/ui'
+
+type DeviceCode = { url: string; code: string; target: 'graph' | 'exo' | null }
 
 export function EngagementPage() {
   const params = useParams<{ id: string }>()
@@ -26,8 +28,39 @@ export function EngagementPage() {
     },
   })
 
+  // Auth + device-code state. The current device code is held in local state;
+  // when auth_complete fires (or the engagement query reports it), we clear.
+  const [deviceCode, setDeviceCode] = useState<DeviceCode | null>(null)
+  const [authStep, setAuthStep] = useState<string | null>(null)
+  const [authComplete, setAuthComplete] = useState(false)
+
+  // Sync from server on initial load (in case the WS stream missed the
+  // earlier events, e.g. after a tab refresh).
+  useEffect(() => {
+    if (data?.auth_complete) {
+      setAuthComplete(true)
+      setDeviceCode(null)
+    }
+  }, [data?.auth_complete])
+
+  const onState = (evt: StateEvent) => {
+    if (evt.type === 'device_code') {
+      setDeviceCode({ url: evt.url, code: evt.code, target: evt.target })
+    } else if (evt.type === 'auth_step') {
+      setAuthStep(evt.step)
+      if (evt.step === 'graph_done') setDeviceCode(null) // EXO code arrives next
+    } else if (evt.type === 'auth_complete') {
+      setAuthComplete(true)
+      setDeviceCode(null)
+      qc.invalidateQueries({ queryKey: ['engagement', id] })
+    } else if (evt.type === 'run_started' || evt.type === 'run_finished') {
+      qc.invalidateQueries({ queryKey: ['engagement', id] })
+    }
+  }
+
   const eng = data?.engagement
   const isActive = eng?.status === 'active' || eng?.status === 'starting'
+  const cmdletsEnabled = isActive && authComplete
 
   if (!Number.isFinite(id))
     return <Centered>Invalid engagement id</Centered>
@@ -48,10 +81,22 @@ export function EngagementPage() {
           <h1 className="text-2xl font-semibold tracking-tight mt-1 flex items-center gap-3">
             {eng.client_name}
             <StatusBadge status={eng.status} />
+            {isActive && !authComplete && (
+              <span className="text-xs px-2 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-warn)_20%,transparent)] text-[var(--color-warn)]">
+                AUTHENTICATING
+              </span>
+            )}
           </h1>
           <p className="text-xs text-[var(--color-muted)] mt-1 font-mono">
             #{eng.id} · {eng.start_date} → {eng.end_date} · {eng.output_folder}
           </p>
+          {isActive && !authComplete && authStep && (
+            <p className="text-xs text-[var(--color-muted)] mt-1">
+              {authStep === 'graph_starting' && 'Connecting to Microsoft Graph…'}
+              {authStep === 'graph_done' && 'Microsoft Graph connected — connecting to Exchange Online…'}
+              {authStep === 'exo_done' && 'Both modules connected.'}
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           <Button
@@ -66,14 +111,89 @@ export function EngagementPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <ConsolePane engagementId={id} isActive={isActive} />
+          <ConsolePane engagementId={id} isActive={isActive} onState={onState} />
         </div>
         <div className="space-y-4">
-          <CmdletPickerCard engagementId={id} disabled={!isActive} />
+          <CmdletPickerCard
+            engagementId={id}
+            disabled={!cmdletsEnabled}
+            disabledReason={
+              !isActive ? 'Engagement ended' : !authComplete ? 'Waiting for device-code auth' : undefined
+            }
+          />
           <RunsCard runs={data?.runs ?? []} />
         </div>
       </div>
+
+      <DeviceCodeModal
+        deviceCode={deviceCode}
+        onDismiss={() => setDeviceCode(null)}
+      />
     </div>
+  )
+}
+
+function DeviceCodeModal({
+  deviceCode,
+  onDismiss,
+}: {
+  deviceCode: DeviceCode | null
+  onDismiss: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  if (!deviceCode) return null
+
+  const targetLabel =
+    deviceCode.target === 'graph'
+      ? 'Microsoft Graph'
+      : deviceCode.target === 'exo'
+        ? 'Exchange Online'
+        : 'Microsoft 365'
+
+  const onCopy = async () => {
+    await navigator.clipboard.writeText(deviceCode.code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Modal open={true} onClose={onDismiss} title={`Sign in to ${targetLabel}`}>
+      <div className="space-y-4">
+        <p className="text-sm text-[var(--color-muted)]">
+          Open the login page and enter this code to authenticate the engagement
+          subprocess against the client tenant. Paste it into the browser; this
+          window will update automatically when the connect completes.
+        </p>
+        <div className="flex items-center justify-between gap-3 rounded border border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_10%,transparent)] px-4 py-3">
+          <code className="text-3xl font-mono font-semibold tracking-wider">
+            {deviceCode.code}
+          </code>
+          <button
+            type="button"
+            onClick={onCopy}
+            className="text-sm px-3 py-1.5 rounded border border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+          >
+            {copied ? 'Copied' : 'Copy code'}
+          </button>
+        </div>
+        <a
+          href={deviceCode.url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-block text-sm px-3 py-2 rounded border border-[var(--color-accent)] bg-[var(--color-accent)] text-black hover:opacity-90"
+        >
+          Open {deviceCode.url} →
+        </a>
+        <p className="text-xs text-[var(--color-muted)] font-mono break-all">
+          {deviceCode.url}
+        </p>
+        <p className="text-xs text-[var(--color-muted)]">
+          Two device codes are expected per engagement -- one for Microsoft
+          Graph, one for Exchange Online. The next code will appear here
+          automatically after this one completes.
+        </p>
+      </div>
+    </Modal>
   )
 }
 
@@ -83,7 +203,15 @@ function Centered({ children }: { children: React.ReactNode }) {
   )
 }
 
-function ConsolePane({ engagementId, isActive }: { engagementId: number; isActive: boolean }) {
+function ConsolePane({
+  engagementId,
+  isActive,
+  onState,
+}: {
+  engagementId: number
+  isActive: boolean
+  onState: (evt: StateEvent) => void
+}) {
   const [lines, setLines] = useState<ConsoleLine[]>([])
   const [stdinValue, setStdinValue] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -100,12 +228,7 @@ function ConsolePane({ engagementId, isActive }: { engagementId: number; isActiv
     })
   })
 
-  const qc = useQueryClient()
-  useStateStream(engagementId, (evt) => {
-    if (evt.type === 'run_started' || evt.type === 'run_finished') {
-      qc.invalidateQueries({ queryKey: ['engagement', engagementId] })
-    }
-  })
+  useStateStream(engagementId, onState)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -177,7 +300,15 @@ function ConsolePane({ engagementId, isActive }: { engagementId: number; isActiv
   )
 }
 
-function CmdletPickerCard({ engagementId, disabled }: { engagementId: number; disabled: boolean }) {
+function CmdletPickerCard({
+  engagementId,
+  disabled,
+  disabledReason,
+}: {
+  engagementId: number
+  disabled: boolean
+  disabledReason?: string
+}) {
   const qc = useQueryClient()
   const run = useMutation({
     mutationFn: (body: { cmdlet: string; params: Record<string, unknown> }) =>
@@ -186,7 +317,10 @@ function CmdletPickerCard({ engagementId, disabled }: { engagementId: number; di
   })
 
   return (
-    <Card title="Run Cmdlet" subtitle="HAWK pickers land in M5/M6">
+    <Card
+      title="Run Cmdlet"
+      subtitle={disabled && disabledReason ? disabledReason : 'HAWK pickers land in M5/M6'}
+    >
       <div className="space-y-2">
         <Button
           onClick={() => run.mutate({ cmdlet: 'Get-Date', params: {} })}
@@ -198,7 +332,7 @@ function CmdletPickerCard({ engagementId, disabled }: { engagementId: number; di
         <Button
           onClick={() =>
             run.mutate({
-              cmdlet: '$PSVersionTable.PSVersion.ToString',
+              cmdlet: '($PSVersionTable.PSVersion).ToString()',
               params: {},
             })
           }
